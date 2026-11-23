@@ -1,0 +1,13 @@
+{
+  "name": "field-report-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "validate": "node scripts/validate-artifact.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "dev": "node scripts/dev.mjs"
+  },
+  "dependencies": { "fflate": "0.8.3", "@xmldom/xmldom": "0.9.12" },
+  "devDependencies": { "esbuild": "0.28.2" }
+}

@@ -1,0 +1,7 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {photoLimit,currentMonth,capturedMonth,selectPhotos} from '../src/policy.js';
+const make=(n,extra={})=>Array.from({length:n},(_,i)=>({id:`p${i}`,hash:`h${i}`,projectId:'site',capturedAt:'2026-11-10T12:00:00Z',caption:'Pruning shrubs',activity:'Pruning',relevant:true,...extra}));
+test('50 through 200 relevant photos; 75 only above 200',()=>{for(const n of [0,1,50,51,200])assert.equal(photoLimit(n),50);assert.equal(photoLimit(201),75);assert.equal(selectPhotos(make(200),'site','2026-11').photos.length,50);assert.equal(selectPhotos(make(201),'site','2026-11').photos.length,75);});
+test('excludes wrong project, month, unmarked, missing captions and duplicates',()=>{const p=[...make(1),...make(1),...make(1,{projectId:'other'}),...make(1,{capturedAt:'2025-11-10T00:00:00Z'}),...make(1,{relevant:false}),...make(1,{caption:''})];assert.equal(selectPhotos(p,'site','2026-11').relevantCount,1);});
+test('month boundaries use the project timezone',()=>{assert.equal(capturedMonth('2026-10-31T21:00:00Z','Asia/Dubai'),'2026-11');assert.equal(capturedMonth('2026-11-30T21:00:00Z','Asia/Dubai'),'2026-12');assert.equal(capturedMonth(null),null);assert.equal(currentMonth('Asia/Calcutta',new Date('2026-11-30T19:00:00Z')),'2026-12');});
+test('spreads selection across work activities',()=>{assert.ok(selectPhotos([...make(100),...make(1,{id:'watering',hash:'water',activity:'Watering'})],'site','2026-11').photos.some(p=>p.id==='watering'));});
