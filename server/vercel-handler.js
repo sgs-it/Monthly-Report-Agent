@@ -8,7 +8,7 @@ export function authenticated(request,env){
  try{const decoded=Buffer.from(header.slice(6),'base64').toString('utf8'),colon=decoded.indexOf(':');return colon>=0&&equal(decoded.slice(0,colon),env.APP_USERNAME||'team')&&equal(decoded.slice(colon+1),env.APP_PASSWORD);}catch{return false;}
 }
 export function routeRequest(request){
- const url=new URL(request.url);if(url.searchParams.has('__route')){const route=url.searchParams.get('__route');if(route.startsWith('/')||route.includes('\\'))throw Error('Invalid route');url.pathname='/'+route;url.searchParams.delete('__route');return new Request(url,request);}return request;
+ const url=new URL(request.url);if(url.searchParams.has('__route')){const route=url.searchParams.get('__route');if(route.startsWith('/')||route.includes('\\'))throw Error('Invalid route');url.pathname='/'+route;url.searchParams.delete('__route');return new Request(url,request);}if(['/api/index','/api/index.js','/api','/api/'].includes(url.pathname)){url.pathname='/';return new Request(url,request);}return request;
 }
 export function createHandler({worker,storage,handleUpload,env}){
  return async incoming=>{
