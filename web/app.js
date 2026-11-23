@@ -1,8 +1,9 @@
 import {currentMonth,periodLabel,selectPhotos,capturedMonth} from '../src/policy.js';
+import {prepareTemplateRequest} from './template-uploads.js';
 const $=s=>document.querySelector(s),$$=s=>Array.from(document.querySelectorAll(s));
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let state={locations:[],reports:[]},page='overview',selectedId='',month=currentMonth(),photos=[],inspection=null,templateFile=null;
-async function api(path,opts={}){const r=await fetch('/api'+path,opts);const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data;}
+async function api(path,opts={}){opts=await prepareTemplateRequest(path,opts);const r=await fetch('/api'+path,opts);const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data;}
 function toast(msg){$('#toast').textContent=msg;$('#toast').classList.remove('hidden');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.add('hidden'),6500);}
 function error(e){console.error(e);toast(e.message);}
 async function busy(button,label,fn){const old=button.textContent;button.disabled=true;button.textContent=label;try{return await fn();}catch(e){error(e);}finally{button.disabled=false;button.textContent=old;}}

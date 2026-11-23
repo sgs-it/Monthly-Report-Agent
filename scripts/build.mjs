@@ -1,10 +1,10 @@
 import {build} from 'esbuild';
-import {mkdir,readFile,writeFile,copyFile} from 'node:fs/promises';
-await mkdir('dist/server',{recursive:true});await mkdir('dist/.openai',{recursive:true});
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
+await mkdir('dist/server',{recursive:true});await mkdir('public',{recursive:true});
 const client=await build({entryPoints:['web/app.js'],bundle:true,write:false,minify:true,format:'iife',target:'es2022'});
 const html=await readFile('web/index.html','utf8');
 const css=await readFile('web/style.css','utf8');
 const manual=await readFile('web/manual.html','utf8');
 await build({entryPoints:['worker/main.js'],outfile:'dist/server/index.js',bundle:true,format:'esm',platform:'browser',target:'es2022',minify:false,define:{__HTML__:JSON.stringify(html),__CSS__:JSON.stringify(css),__CLIENT__:JSON.stringify(client.outputFiles[0].text),__MANUAL__:JSON.stringify(manual)}});
-await copyFile('.openai/hosting.json','dist/.openai/hosting.json');
-console.log('Built Field Report Agent');
+await writeFile('public/health.txt','Field Report Agent build ready\n');
+console.log('Built Field Report Agent for Vercel (no .openai manifest required)');
