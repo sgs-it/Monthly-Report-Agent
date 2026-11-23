@@ -1,5 +1,6 @@
 import {createHash,timingSafeEqual} from 'node:crypto';
 import {BlobBucket} from './blob-bucket.js';
+import {createCompanyCamHandler} from './companycam.js';
 const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store'}});
 const equal=(a,b)=>timingSafeEqual(createHash('sha256').update(a).digest(),createHash('sha256').update(b).digest());
 export function authenticated(request,env){
@@ -10,7 +11,8 @@ export function authenticated(request,env){
 export function routeRequest(request){
  const url=new URL(request.url);if(url.searchParams.has('__route')){const route=url.searchParams.get('__route');if(route.startsWith('/')||route.includes('\\'))throw Error('Invalid route');url.pathname='/'+route;url.searchParams.delete('__route');return new Request(url,request);}if(['/api/index','/api/index.js','/api','/api/'].includes(url.pathname)){url.pathname='/';return new Request(url,request);}return request;
 }
-export function createHandler({worker,storage,handleUpload,env}){
+export function createHandler({worker,storage,handleUpload,env,fetchImpl,normalizePhoto}){
+ const companyCam=createCompanyCamHandler({env,fetchImpl,normalize:normalizePhoto});
  return async incoming=>{
   try{
    const request=routeRequest(incoming),url=new URL(request.url),path=url.pathname;
@@ -23,6 +25,7 @@ export function createHandler({worker,storage,handleUpload,env}){
    if(!env.APP_PASSWORD||env.APP_PASSWORD.length<16)return new Response('Setup required: add APP_PASSWORD (at least 16 characters) in Vercel environment variables, then redeploy.',{status:503,headers:{'Cache-Control':'no-store'}});
    if(!authenticated(request,env))return new Response('Sign in with the team username and password.',{status:401,headers:{'WWW-Authenticate':'Basic realm="Field Report Agent", charset="UTF-8"','Cache-Control':'no-store'}});
    if(request.method!=='GET'&&request.method!=='HEAD'&&request.headers.get('Origin')&&request.headers.get('Origin')!==url.origin)return json({error:'Cross-site request rejected.'},403);
+   if(path.startsWith('/api/companycam/'))return companyCam(request,env.BLOB_READ_WRITE_TOKEN?new BlobBucket(storage,env.BLOB_READ_WRITE_TOKEN):null);
    if(path==='/api/uploads'){
     if(!uploadBody)return json({error:'Use POST to upload.'},405);
     if(!env.BLOB_READ_WRITE_TOKEN)return json({error:'Connect a private Vercel Blob store with BLOB_READ_WRITE_TOKEN, then redeploy.'},503);

@@ -8,8 +8,19 @@
     "test": "node --test tests/*.test.mjs",
     "dev": "node --env-file-if-exists=.env.local scripts/dev-vercel.mjs"
   },
-  "dependencies": { "fflate": "0.8.3", "@xmldom/xmldom": "0.9.12", "@vercel/blob": "2.9.0" },
-  "devDependencies": { "esbuild": "0.28.2" },
-  "engines": { "node": "24.x" },
-  "overrides": { "zod": "4.6.7" }
+  "dependencies": {
+    "@vercel/blob": "2.9.0",
+    "@xmldom/xmldom": "0.9.12",
+    "fflate": "0.8.3",
+    "sharp": "0.35.5"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "overrides": {
+    "zod": "4.6.7"
+  }
 }

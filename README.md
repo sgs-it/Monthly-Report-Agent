@@ -19,12 +19,16 @@ The existing private Sites app and its files are separate. This package does not
 
 Word masters control the document layout, tables, headers, footers, and static content. Excel masters retain their workbook layout for Excel output and receive a separate Word rendering of worksheet sections. Original templates are kept as the basis for generated copies.
 
-Only relevant work photos from the chosen project and capture month are eligible. The normal maximum is 50 photos; it becomes 75 only when more than 200 unique relevant photos are available. Manual capture dates, relevance marking, and captions are required until the CompanyCam connector is implemented. Monthly narrative, statuses, readings, signatures, and other unsupported facts still need review and template mapping.
+Only relevant work photos from the chosen project and capture month are eligible. The normal maximum is 50 photos; it becomes 75 only when more than 200 unique relevant photos are available. CompanyCam imports use captured_at in each site's time zone. Imported photos require caption and work-activity review before report selection. Manual uploads still require capture dates. Monthly narrative, statuses, readings, signatures, and other unsupported facts still need review and template mapping.
 
-CompanyCam integration and unattended monthly scheduling remain pending. No CompanyCam key is included or used by this package.
+## CompanyCam
+
+Add COMPANYCAM_API_KEY as a Production Secret in Vercel, then deploy this source. The app verifies the key through CompanyCam and shows its connection status. Open Photo library, choose your report project, link the exact CompanyCam project, select the month, and import its photos. Review the imported work photos and their captions before generating a report. Photo pagination continues until all pages are processed; interrupted imports can be retried without overwriting existing review decisions. The key stays on the server. No key is included in this package. See VERCEL_SETUP.md for details and troubleshooting.
+
+Visual AI classification and unattended scheduling are still pending. Storage in this package continues to use private Vercel Blob; Supabase migration is not included.
 
 ## Development and checks
 
 Use Node.js 24. Copy .env.example to .env.local and configure a separate development private Blob store and team credentials. Run npm ci, npm run build, npm test, npm run validate, then npm run dev. The development entry point uses private Blob storage.
 
-The build, authentication, storage adapter, staged uploads larger than 4.5 MB, report generation, and streamed downloads are tested locally. Tests use simulated Blob storage. The private-master Excel test skips when the customer master folder is absent. Live Vercel deployment and real Blob credentials have not been tested in your account. Automatic visual Word rendering was unavailable during the earlier document checks.
+The build, authentication, storage adapter, staged uploads larger than 4.5 MB, report generation, streamed downloads, and CompanyCam connection/month/project/pagination/retry rules are tested locally. Tests use simulated external services and a real JPEG image processor. The private-master Excel test skips when the customer master folder is absent. Your actual CompanyCam key and live Vercel deployment have not been tested. Automatic visual Word rendering was unavailable during the earlier document checks.

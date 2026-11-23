@@ -9,6 +9,7 @@ test('Vercel adapter completes large master upload, photo selection, persistence
  };
  const env={APP_PASSWORD:'synthetic-test-password-123',BLOB_READ_WRITE_TOKEN:'synthetic'};const headers={Authorization:'Basic '+Buffer.from('team:'+env.APP_PASSWORD).toString('base64')};const handler=createHandler({worker,storage,env});
  const call=(path,opts={})=>handler(new Request('https://app.test'+path,{...opts,headers:{...headers,...opts.headers}}));
+ for(const p of ['/','/api/index','/api/index?__route=']){const home=await call(p);assert.equal(home.status,200);assert.ok((await home.text()).includes('Field Report Agent'));}
  const z=unzipSync(demoTemplate());z['word/media/unused.png']=new Uint8Array(5*1024*1024);const bytes=zipSync(z,{level:0});assert.ok(bytes.length>4.5*1024*1024);
  const path='incoming/12345678-abcd.docx';values.set(path,bytes);
  const result=await call('/api/locations',{method:'POST',headers:{'Content-Type':'application/json','x-staged-upload':'1'},body:JSON.stringify({uploadPath:path,filename:'test-master.docx',metadata:JSON.stringify({name:'Test site',timeZone:'Asia/Dubai'})})});assert.equal(result.status,201);const site=await result.json();assert.equal(values.has(path),false);
@@ -16,4 +17,20 @@ test('Vercel adapter completes large master upload, photo selection, persistence
  const generated=await call('/api/reports',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectId:site.id,month:'2026-11',reviewed:true,summary:'Pruning completed.'})});assert.equal(generated.status,201);const report=await generated.json();assert.equal(report.photoCount,1);
  const download=await call(`/api/reports/${report.id}/download`);assert.equal(download.status,200);assert.ok(download.body instanceof ReadableStream);assert.ok(unzipSync(new Uint8Array(await download.arrayBuffer()))['word/document.xml']);
  const state=await(await call('/api/state')).json();assert.equal(state.locations.length,1);assert.equal(state.reports.length,1);
+});
+
+test('CompanyCam import requires review before Word generation and excludes a previous project link',async()=>{
+ const values=new Map(),storage={put:async(k,v)=>{values.set(k,typeof v==='string'?new TextEncoder().encode(v):new Uint8Array(v));},get:async k=>values.has(k)?{statusCode:200,stream:new Response(values.get(k)).body,blob:{size:values.get(k).length}}:null,list:async({prefix})=>({blobs:[...values.keys()].filter(k=>k.startsWith(prefix)).map(pathname=>({pathname})),hasMore:false}),del:async()=>{}};
+ const jpg=await readFile(new URL('./fixtures/test-photo.jpg',import.meta.url));
+ const env={APP_PASSWORD:'synthetic-test-password-123',BLOB_READ_WRITE_TOKEN:'synthetic',COMPANYCAM_API_KEY:'synthetic'};
+ const upstream=async url=>{const u=new URL(url);if(u.hostname==='companycam.imgix.net')return new Response(jpg);return Response.json({data:u.pathname.includes('/photos/')?{id:'10',project_id:'42',captured_at:'2026-11-05T00:00:00Z',description:{plain_text_content:'Pruning'},uris:[{type:'web',url:'https://companycam.imgix.net/photo.jpg'}]}:{id:u.pathname.endsWith('/43')?'43':'42',name:'CompanyCam site'},errors:[],meta:{has_next:false,next_cursor:null}});};
+ const handler=createHandler({worker,storage,env,fetchImpl:upstream});const auth={Authorization:'Basic '+Buffer.from('team:'+env.APP_PASSWORD).toString('base64')};
+ const call=(p,opts={})=>handler(new Request('https://app.test/api'+p,{...opts,headers:{...auth,...opts.headers}})),post=(p,data)=>call(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+ const f=new FormData();f.append('template',new File([demoTemplate()],'master.docx'));f.append('metadata',JSON.stringify({name:'Site',timeZone:'Asia/Dubai'}));const created=await call('/locations',{method:'POST',body:f});assert.equal(created.status,201);const l=await created.json();
+ assert.equal((await post('/companycam/link',{locationId:l.id,companyCamProjectId:'42'})).status,200);
+ const imported=await post('/companycam/import',{locationId:l.id,month:'2026-11',photoId:'10'});assert.equal(imported.status,201);const p=(await imported.json()).photo;
+ const generate=()=>post('/reports',{projectId:l.id,month:'2026-11',reviewed:true,summary:'Pruning completed.'});assert.equal((await generate()).status,400);
+ const review=await call(`/photos/${l.id}/${p.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({relevant:true,caption:'Reviewed pruning work',activity:'Pruning'})});assert.equal(review.status,200);assert.equal((await review.json()).reviewRequired,false);
+ const generated=await generate();assert.equal(generated.status,201);const report=await generated.json();assert.equal(report.photoCount,1);const download=await call(`/reports/${report.id}/download`);assert.equal(download.status,200);assert.ok(unzipSync(new Uint8Array(await download.arrayBuffer()))['word/document.xml']);
+ assert.equal((await post('/companycam/link',{locationId:l.id,companyCamProjectId:'43'})).status,200);assert.deepEqual(await(await call(`/locations/${l.id}/photos`)).json(),[]);assert.equal((await generate()).status,400);assert.ok(values.has(`field-report/photos/${l.id}/${p.id}.json`));
 });

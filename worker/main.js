@@ -5,6 +5,7 @@ const json=(v,status=200)=>new Response(JSON.stringify(v),{status,headers:{'Cont
 const get=async(b,k)=>(await b.get(k))?.json();
 const put=(b,k,v)=>b.put(k,JSON.stringify(v),{httpMetadata:{contentType:'application/json'}});
 async function records(b,prefix){let cursor,keys=[];do{const r=await b.list({prefix,cursor,limit:1000});keys.push(...r.objects);cursor=r.truncated?r.cursor:undefined;}while(cursor);const out=[];for(let i=0;i<keys.length;i+=20)out.push(...await Promise.all(keys.slice(i,i+20).map(x=>get(b,x.key))));return out.filter(Boolean);}
+async function projectPhotos(b,l){return (await records(b,`photos/${l.id}/`)).filter(p=>p.source!=='companycam'||p.companyCamProjectId===l.companyCamProjectId);}
 async function handle(req,env){
  const url=new URL(req.url),path=url.pathname;
  const assets={'/':[__HTML__,'text/html'],'/app.js':[__CLIENT__,'text/javascript'],'/style.css':[__CSS__,'text/css'],'/manual':[__MANUAL__,'text/html']};
@@ -12,7 +13,7 @@ async function handle(req,env){
  if(!path.startsWith('/api/'))return json({error:'Not found'},404);
  if(req.method!=='GET'&&req.headers.get('Origin')&&req.headers.get('Origin')!==url.origin)return json({error:'Cross-site request rejected'},403);
  const b=env.BUCKET;if(!b)return json({error:'Project storage is not configured.'},503);
- if(path==='/api/state')return json({locations:(await records(b,'locations/')).sort((a,b)=>a.name.localeCompare(b.name)),reports:(await records(b,'reports/')).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),currentMonth:currentMonth(),companyCamConnected:false});
+ if(path==='/api/state')return json({locations:(await records(b,'locations/')).sort((a,b)=>a.name.localeCompare(b.name)),reports:(await records(b,'reports/')).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),currentMonth:currentMonth()});
  if(path==='/api/templates/inspect'&&req.method==='POST'){const bytes=new Uint8Array(await req.arrayBuffer()),excel=req.headers.get('x-template-format')==='xlsx';return json({...inspectTemplate(excel?excelToWordTemplate(bytes,'Monthly reporting log'):bytes),excel});}
  if(path==='/api/locations'&&req.method==='POST'){
   const f=await req.formData(),file=f.get('template'),m=JSON.parse(f.get('metadata')||'{}');
@@ -21,13 +22,13 @@ async function handle(req,env){
   const original=new Uint8Array(await file.arrayBuffer()),isExcel=/\.xlsx$/i.test(file.name);let bytes=isExcel?excelToWordTemplate(original,m.name):original;let inspection=inspectTemplate(bytes);if(!inspection.bodyImageCount&&!inspection.tokens.includes('{{PHOTOS}}')){const donor=(await records(b,'locations/')).find(l=>l.inspection?.photoTables?.length);if(donor){const f=await b.get(donor.templateKey);bytes=appendPhotoSection(bytes,new Uint8Array(await f.arrayBuffer()));inspection=inspectTemplate(bytes);m.mapping={...m.mapping,photoTableIndices:inspection.tables.filter(t=>t.images>=2).map(t=>t.index)};}}const id=m.id&&/^[\w-]+$/.test(m.id)?m.id:crypto.randomUUID();
   const old=await get(b,`locations/${id}.json`),mapping=m.mapping||{photoTableIndices:inspection.tables.filter(t=>t.images>=2).map(t=>t.index),periodText:m.periodText||''};
   if(!mapping.photoTableIndices?.length&&!inspection.tokens.includes('{{PHOTOS}}')&&!Number.isInteger(mapping.photoIndex))throw Error('No photo layout found. Map a photo table or add a {{PHOTOS}} paragraph in Word.');
-  if(mapping.periodText&&!Number.isInteger(mapping.periodIndex)){const p=inspection.paragraphs.find(p=>p.text.includes(mapping.periodText));if(p)mapping.periodIndex=p.index;}const l={id,format:isExcel?'xlsx':'docx',excelTemplateKey:isExcel?`excel-templates/${id}.xlsx`:null,name:m.name.trim(),client:m.client||'',code:m.code||'',companyCamProjectId:m.companyCamProjectId||'',timeZone:m.timeZone,templateName:file.name,templateKey:`templates/${id}/${crypto.randomUUID()}.docx`,mapping,createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString(),inspection:{bodyImageCount:inspection.bodyImageCount,photoTables:inspection.tables.filter(t=>mapping.photoTableIndices?.includes(t.index))}};
+  if(mapping.periodText&&!Number.isInteger(mapping.periodIndex)){const p=inspection.paragraphs.find(p=>p.text.includes(mapping.periodText));if(p)mapping.periodIndex=p.index;}const l={id,format:isExcel?'xlsx':'docx',excelTemplateKey:isExcel?`excel-templates/${id}.xlsx`:null,name:m.name.trim(),client:m.client||'',code:m.code||'',companyCamProjectId:m.companyCamProjectId||old?.companyCamProjectId||'',companyCamProjectName:old?.companyCamProjectName||'',timeZone:m.timeZone,templateName:file.name,templateKey:`templates/${id}/${crypto.randomUUID()}.docx`,mapping,createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString(),inspection:{bodyImageCount:inspection.bodyImageCount,photoTables:inspection.tables.filter(t=>mapping.photoTableIndices?.includes(t.index))}};
   if(isExcel)await b.put(l.excelTemplateKey,original);await b.put(l.templateKey,bytes);await put(b,`locations/${id}.json`,l);return json(l,201);
  }
  const lm=path.match(/^\/api\/locations\/([\w-]+)\/(photos|template)$/);
  if(lm){const [,id,kind]=lm,l=await get(b,`locations/${id}.json`);if(!l)return json({error:'Project not found'},404);
   if(kind==='template'){const f=await b.get(l.templateKey);return new Response(f.body,{headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','Content-Disposition':'attachment; filename="master-template.docx"'}});}
-  if(req.method==='GET')return json(await records(b,`photos/${id}/`));
+  if(req.method==='GET')return json(await projectPhotos(b,l));
   if(req.method==='POST'){
    const f=await req.formData(),file=f.get('photo'),m=JSON.parse(f.get('metadata')||'{}');
    if(!(file instanceof File)||file.size>2000000)throw Error('Photo must be a normalized JPEG under 2 MB.');
@@ -41,14 +42,14 @@ async function handle(req,env){
  }
  const pm=path.match(/^\/api\/photos\/([\w-]+)\/([\w-]+)$/);
  if(pm){const [,project,id]=pm,k=`photos/${project}/${id}.json`,p=await get(b,k);if(!p)return json({error:'Photo not found'},404);
-  if(req.method==='PATCH'){const d=await req.json();for(const k of ['caption','activity','relevant','capturedAt'])if(d[k]!==undefined)p[k]=d[k];if(typeof p.relevant!=='boolean'||!p.capturedAt||!Number.isFinite(new Date(p.capturedAt).getTime()))throw Error('Invalid photo details.');p.caption=String(p.caption||'').slice(0,500);p.activity=String(p.activity||'').slice(0,100);await put(b,k,p);return json(p);}
+  if(req.method==='PATCH'){const d=await req.json();for(const k of ['caption','activity','relevant','capturedAt'])if(d[k]!==undefined)p[k]=d[k];if(typeof p.relevant!=='boolean'||!p.capturedAt||!Number.isFinite(new Date(p.capturedAt).getTime()))throw Error('Invalid photo details.');if(p.source==='companycam'){p.reviewRequired=!p.relevant;p.reviewedAt=new Date().toISOString();}p.caption=String(p.caption||'').slice(0,500);p.activity=String(p.activity||'').slice(0,100);await put(b,k,p);return json(p);}
   if(req.method==='DELETE'){await b.delete([k,`images/${id}.jpg`]);return json({ok:true});}
  }
  const im=path.match(/^\/api\/images\/([\w-]+)$/);if(im){const f=await b.get(`images/${im[1]}.jpg`);return f?new Response(f.body,{headers:{'Content-Type':'image/jpeg','Cache-Control':'private, max-age=3600'}}):json({error:'Not found'},404);}
  if(path==='/api/reports'&&req.method==='POST'){
   const d=await req.json();if(!/^[\w-]+$/.test(d.projectId||'')||!validMonth(d.month))throw Error('Choose a project and report month.');if(d.reviewed!==true)throw Error('Review monthly details before generating.');
   const l=await get(b,`locations/${d.projectId}.json`);if(!l)return json({error:'Project not found'},404);
-  const selection=selectPhotos(await records(b,`photos/${l.id}/`),l.id,d.month,l.timeZone);if(!selection.photos.length)throw Error('No eligible photos for this project and month. Add captions and mark relevant work photos.');if(!d.summary?.trim())throw Error('Enter this month’s work summary.');
+  const selection=selectPhotos(await projectPhotos(b,l),l.id,d.month,l.timeZone);if(!selection.photos.length)throw Error('No eligible photos for this project and month. Add captions and mark relevant work photos.');if(!d.summary?.trim())throw Error('Enter this month’s work summary.');
   const photos=[];for(const p of selection.photos){const f=await b.get(`images/${p.id}.jpg`);if(!f)throw Error('Selected photo is missing.');photos.push({...p,bytes:new Uint8Array(await f.arrayBuffer())});}
   const t=await b.get(l.templateKey),period=periodLabel(d.month),values={REPORT_PERIOD:period,REPORT_MONTH:period.split(' ')[0],REPORT_YEAR:d.month.slice(0,4),LOCATION:l.name,WORK_SUMMARY:d.summary.trim()};
   const bytes=generateReport(new Uint8Array(await t.arrayBuffer()),l.mapping,values,photos),id=crypto.randomUUID();

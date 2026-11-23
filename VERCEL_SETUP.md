@@ -49,7 +49,15 @@ Open Projects & templates > Import template folder and choose your local master 
 
 ## CompanyCam
 
-The CompanyCam connector is still pending. This package fixes Vercel hosting and storage; it does not activate CompanyCam or use a CompanyCam key yet. Do not put an API key into source files.
+Add COMPANYCAM_API_KEY as a Secret in Vercel Project Settings > Environment Variables for Production, then deploy this updated source. Use an active CompanyCam Application Key with permission to read projects and photos. No CompanyCam credential is sent to the browser. A direct Application Key connection does not use an OAuth redirect URL.
+
+The app checks CompanyCam and displays Connected only after an API request succeeds. In Photo library, select your report project, click Link CompanyCam project, and choose the matching remote project. Choose the reporting month and click Import photos. Additional project pages are available through Load more projects; photo pages are imported until the complete result is reached. Repeated imports preserve existing photos and review decisions. Interrupted imports show an error; retry to resume.
+
+Only photos whose captured_at falls in the selected month in the site's time zone are imported. Upload dates are never substituted. Photos without capture dates are excluded. Each imported photo starts unmarked: review it, supply or check its caption, and mark work activity / completed work. The existing policy then selects at most 50 photos, or 75 when more than 200 unique relevant photos have been reviewed. Visual AI classification and unattended scheduling are still pending.
+
+Images are resized to JPEG on the server. Sources must use CompanyCam HTTPS image hosts; a photo without a supported image URL must be uploaded manually. Imports do not write to CompanyCam. This package continues to use the existing private Vercel Blob storage; it does not migrate storage to Supabase.
+
+If the status says Not connected, use Check connection and follow the returned error. Check that the variable is named exactly COMPANYCAM_API_KEY, contains the Application Key rather than an OAuth client ID, is saved for Production, and has been included in a fresh deployment.
 
 ## Local development
 
