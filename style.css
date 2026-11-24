@@ -4,3 +4,17 @@
 
 /* Readability for primary controls and report data. */
 label,.primary,.secondary,.text-button,td,nav button{font-size:14px}.muted{font-size:16px}.helper,small,.site-meta,.section-top p,.tag,.pill{font-size:12px}.photo-info label{font-size:14px}.photo-info input{font-size:14px}
+
+.cc-picker {width:min(36rem,94vw)}
+.cc-results {max-height:38vh;overflow-y:auto;padding:0;border:0;margin:0}
+.cc-results label {display:flex;flex-direction:row;align-items:center;gap:.8rem;margin:0;padding:.7rem .5rem;border-bottom:1px solid #dce4df;cursor:pointer}
+.cc-results input {width:1rem;flex:none;margin:0}
+.cc-results label:has(:checked) {background:#ecf5ed}
+.cc-results small,.cc-results strong {display:block;overflow-wrap:anywhere}
+.cc-results small,.cc-site,.job-number {color:#465e55}
+.cc-picker [hidden] {display:none}
+.job-number {display:block;max-width:42rem;white-space:normal;overflow-wrap:anywhere}
+#location-select {max-width:100%}
+
+.toolbar label:has(#location-select){min-width:0;max-width:100%}
+@media(max-width:760px){.toolbar label:has(#location-select){flex-basis:100%}}

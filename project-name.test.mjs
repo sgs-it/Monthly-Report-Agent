@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {zipSync,strToU8} from 'fflate';
 import {readWordIdentity} from '../src/docx.js';
 import {projectLabel} from '../src/project-name.js';
+test('a legacy master project includes its saved code before Word metadata is refreshed',()=>{
+ assert.equal(projectLabel({name:'Ramool',code:'12A11110 / 12B11110'}),'Ramool — 12A11110 / 12B11110');
+});
 
 test('the project label uses adjacent Word cells and joins text split into formatting runs',()=>{
   const cell=parts=>'<w:tc><w:p>'+parts.map(part=>'<w:r><w:t>'+part+'</w:t></w:r>').join('')+'</w:p></w:tc>';

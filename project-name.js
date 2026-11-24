@@ -7,11 +7,14 @@ export function filenameLocation(filename='') {
 
 export function projectLabel(project) {
   if (!project) return '';
-  if (!project.wordIdentity) return project.name;
-  const {location, jobCode} = project.wordIdentity;
+  const {location} = project.wordIdentity || {};
   const site = location || (/^(location|job\s*code|job\s*number)$/i.test(project.name) ? filenameLocation(project.templateName) : project.name);
-  const code = jobCode || project.code || filenameJobCode(project.templateName);
+  const code = projectJobCode(project);
   return code && !site.endsWith(code) ? site+' — '+code : site;
+}
+
+export function projectJobCode(project) {
+  return project?.wordIdentity?.jobCode || project?.code || (project && project.format!=='xlsx' ? filenameJobCode(project.templateName) : '');
 }
 
 // Some masters have service text in the job-code cell but end their filename with the job number.

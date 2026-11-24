@@ -1,4 +1,4 @@
-import {projectLabel,filenameLocation,filenameJobCode} from '../src/project-name.js';
+import {projectJobCode,projectLabel,filenameLocation,filenameJobCode} from '../src/project-name.js';
 import {currentMonth,periodLabel,selectPhotos,capturedMonth} from '../src/policy.js';
 import {prepareTemplateRequest} from './template-uploads.js';
 import {PREDEFINED_CAPTIONS} from '../src/captions.js';
@@ -49,15 +49,47 @@ function render(){
  else $('#content').innerHTML=heading('REPORT ARCHIVE','Generated reports','Download and review your monthly Word reports.')+`<section class="section-card">${state.reports.length?reportRows(state.reports):empty('Your reports will appear here','Choose a project, add eligible photos, and generate your first Word report.',`<button class="secondary" data-page="photos">Open photo library</button>`)}</section>`;
  companyCam.render();
 }
+let readingJobNumbers=false;
+function updateJobNumberDisplay(){
+ const site=location(),label=document.querySelector('#selected-job-number');
+ if(!label||!site)return;
+ const code=projectJobCode(site);
+ label.textContent=code?'Job number: '+code:site.format!=='xlsx'&&!site.wordIdentity?'Reading job number from the saved master…':'Job number unavailable';
+}
+async function fillMissingProjectLabels(){
+ if(readingJobNumbers)return;
+ readingJobNumbers=true;
+ const pending=state.locations.filter(site=>site.format!=='xlsx'&&!site.wordIdentity);
+ pending.sort((a,b)=>Number(b.id===selectedId)-Number(a.id===selectedId));
+ try{
+  for(const site of pending){
+   if(page!=='photos')break;
+   try{
+    const updated=await api('/locations/'+site.id+'/word-name',{method:'POST'});
+    const current=state.locations.find(item=>item.id===site.id);
+    if(!current||current.templateKey!==updated.templateKey)continue;
+    current.wordIdentity=updated.wordIdentity;
+    const select=document.querySelector('#location-select');
+    const option=select&&Array.from(select.options).find(o=>o.value===site.id);
+    if(option)option.textContent=projectLabel(current);
+    updateJobNumberDisplay();
+   }catch{
+    if(site.id===selectedId&&document.querySelector('#selected-job-number')&&!projectJobCode(site)){
+     document.querySelector('#selected-job-number').textContent='Could not read the job number. Reopen the photo library to retry.';
+    }
+   }
+  }
+ }finally{readingJobNumbers=false;}
+}
 function renderPhotos(){
  const l=location(),selection=l?selectPhotos(photos,l.id,month,l.timeZone):{photos:[],relevantCount:0,limit:50},selected=new Set(selection.photos.map(p=>p.id));
  $('#content').innerHTML=heading('MONTHLY EVIDENCE','Photo library','Review work activity and completed work for the selected site.',`<button class="primary" id="add-photos" ${!l?'disabled':''}>＋ Add photos</button>`)+
- `<div class="toolbar"><label>Project<select id="location-select">${state.locations.length?state.locations.map(l=>`<option value="${l.id}" ${l.id===selectedId?'selected':''}>${esc(projectLabel(l))}</option>`).join(''):'<option>Add a project first</option>'}</select></label><label>Reporting month<input id="report-month" type="month" value="${month}"></label><button class="primary" id="open-generate" ${!selection.photos.length?'disabled':''}>Create Word report</button></div>`+
+ `<div class="toolbar"><label>Project<select id="location-select">${state.locations.length?state.locations.map(l=>`<option value="${l.id}" ${l.id===selectedId?'selected':''}>${esc(projectLabel(l))}</option>`).join(''):'<option>Add a project first</option>'}</select><small class="job-number" id="selected-job-number"></small></label><label>Reporting month<input id="report-month" type="month" value="${month}"></label><button class="primary" id="open-generate" ${!selection.photos.length?'disabled':''}>Create Word report</button></div>`+
  (l?'<div id="companycam-controls"></div>':'')+
  (l?`<div class="selection-summary"><strong>${selection.photos.length} selected</strong> from ${selection.relevantCount} unique, relevant ${esc(periodLabel(month))} photos · Maximum ${selection.limit} · ${esc(l.timeZone)}<br><small>Exact duplicates, photos outside this month, and unmarked photos are excluded.</small></div>`:'')+
  (photos.length?`<div class="photo-grid">${photos.map(p=>`<article class="photo-card" data-photo="${p.id}"><img src="/api/images/${p.id}" loading="lazy" alt="${esc(p.caption||p.name)}"><div class="photo-info"><div class="photo-state"><span class="tag ${selected.has(p.id)?'':'neutral'}">${selected.has(p.id)?'Selected':capturedMonth(p.capturedAt,l.timeZone)!==month?'Outside month':p.relevant?'Not selected':'Needs review'}</span><button data-remove-photo="${p.id}">Remove</button></div><small>${esc(p.name)}</small><small>${esc(new Intl.DateTimeFormat('en',{timeZone:l.timeZone,day:'numeric',month:'short',year:'numeric'}).format(new Date(p.capturedAt)))}</small><label>Caption<select data-caption="${p.id}">${captionOptions(p.caption)}</select></label><label>Activity<input value="${esc(p.activity)}" data-activity="${p.id}"></label><label class="check"><input type="checkbox" data-relevant="${p.id}" ${p.relevant?'checked':''}><span>Work activity / completed work</span></label></div></article>`).join('')}</div>`:empty(l?'Add this month’s work photos':'Choose a project template first',l?'Upload current-month photos and confirm the activity visible in them.':'Your project template determines the final report layout.',l?'':`<button class="secondary" data-add>Add project template</button>`));
  $('#location-select').onchange=async e=>{selectedId=e.target.value;await loadPhotos();renderPhotos();};$('#report-month').onchange=e=>{if(e.target.value){month=e.target.value;renderPhotos();}};
- $('#add-photos').onclick=()=>{if(!location())return;$('#photos-form').reset();$('#photos-dialog').showModal();};$('#open-generate').onclick=openGenerate;companyCam.render();
+ $('#add-photos').onclick=()=>{if(!location())return;$('#photos-form').reset();$('#photos-dialog').showModal();};$('#open-generate').onclick=openGenerate;companyCam.render();updateJobNumberDisplay();void fillMissingProjectLabels();
 }
 async function loadPhotos(){photos=selectedId?await api(`/locations/${selectedId}/photos`):[];}
 async function changePage(next){page=next;if(page==='photos'){month=currentMonth(location()?.timeZone||'Asia/Calcutta');await loadPhotos();}render();}

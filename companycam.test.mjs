@@ -9,6 +9,16 @@ const photo={id:'10',project_id:'42',captured_at:'2026-11-05T12:00:00Z',descript
 const response=(data,meta={has_next:false,next_cursor:null})=>Response.json({data,errors:[],meta});
 function bucket(){const values=new Map([['locations/site.json',JSON.stringify(location)]]);return {values,get:async key=>values.has(key)?{json:async()=>JSON.parse(values.get(key))}:null,put:async(key,value)=>{values.set(key,value);}};}
 const request=(path,data)=>new Request('https://app.test/api/companycam/'+path,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});
+test('project search uses the CompanyCam search endpoint and retains the query on later pages', async () => {
+ const handler=createCompanyCamHandler({env:{COMPANYCAM_API_KEY:'test'},fetchImpl:async url=>{
+  assert.equal(url.pathname,'/public_api/v1/projects/search');
+  assert.equal(url.searchParams.get('query'),'AFE & FAMCO');
+  assert.equal(url.searchParams.get('after'),'page2');
+  return response([{id:'27',name:'Ramool',address:{street_address_1:'Site 1',city:'Dubai'}}]);
+ }});
+ const result=await handler(request('projects?query=AFE+%26+FAMCO&after=page2'));
+ assert.deepEqual((await result.json()).projects,[{id:'27',name:'Ramool',address:'Site 1, Dubai'}]);
+});
 test('connection status distinguishes missing, rejected and working keys without disclosing credentials',async()=>{
  let calls=0;const missing=createCompanyCamHandler({env:{},fetchImpl:async()=>{calls++;}});assert.equal((await(await missing(request('status'))).json()).configured,false);assert.equal(calls,0);
  const bad=createCompanyCamHandler({env:{COMPANYCAM_API_KEY:'synthetic-private-key'},fetchImpl:async()=>new Response('synthetic-private-key upstream detail',{status:401})});const status=await(await bad(request('status'))).json();assert.equal(status.connected,false);assert.ok(!JSON.stringify(status).includes('synthetic-private-key'));assert.match(status.message,/rejected/);
