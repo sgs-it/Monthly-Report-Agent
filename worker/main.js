@@ -1,6 +1,6 @@
 import {allowedCaption} from '../src/captions.js';
 import {excelToWordTemplate,generateExcelReport} from '../src/xlsx.js';
-import {inspectTemplate,generateReport,appendPhotoSection} from '../src/docx.js';
+import {readWordIdentity,inspectTemplate,generateReport,appendPhotoSection} from '../src/docx.js';
 import {selectPhotos,currentMonth,periodLabel,validMonth} from '../src/policy.js';
 const json=(v,status=200)=>new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
 const get=async(b,k)=>(await b.get(k))?.json();
@@ -23,8 +23,23 @@ async function handle(req,env){
   const original=new Uint8Array(await file.arrayBuffer()),isExcel=/\.xlsx$/i.test(file.name);let bytes=isExcel?excelToWordTemplate(original,m.name):original;let inspection=inspectTemplate(bytes);if(!inspection.bodyImageCount&&!inspection.tokens.includes('{{PHOTOS}}')){const donor=(await records(b,'locations/')).find(l=>l.inspection?.photoTables?.length);if(donor){const f=await b.get(donor.templateKey);bytes=appendPhotoSection(bytes,new Uint8Array(await f.arrayBuffer()));inspection=inspectTemplate(bytes);m.mapping={...m.mapping,photoTableIndices:inspection.tables.filter(t=>t.images>=2).map(t=>t.index)};}}const id=m.id&&/^[\w-]+$/.test(m.id)?m.id:crypto.randomUUID();
   const old=await get(b,`locations/${id}.json`),mapping=m.mapping||{photoTableIndices:inspection.tables.filter(t=>t.images>=2).map(t=>t.index),periodText:m.periodText||''};
   if(!mapping.photoTableIndices?.length&&!inspection.tokens.includes('{{PHOTOS}}')&&!Number.isInteger(mapping.photoIndex))throw Error('No photo layout found. Map a photo table or add a {{PHOTOS}} paragraph in Word.');
-  if(mapping.periodText&&!Number.isInteger(mapping.periodIndex)){const p=inspection.paragraphs.find(p=>p.text.includes(mapping.periodText));if(p)mapping.periodIndex=p.index;}const l={id,format:isExcel?'xlsx':'docx',excelTemplateKey:isExcel?`excel-templates/${id}.xlsx`:null,name:m.name.trim(),client:m.client||'',code:m.code||'',companyCamProjectId:m.companyCamProjectId||old?.companyCamProjectId||'',companyCamProjectName:old?.companyCamProjectName||'',timeZone:m.timeZone,templateName:file.name,templateKey:`templates/${id}/${crypto.randomUUID()}.docx`,mapping,createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString(),inspection:{bodyImageCount:inspection.bodyImageCount,photoTables:inspection.tables.filter(t=>mapping.photoTableIndices?.includes(t.index))}};
+  if(mapping.periodText&&!Number.isInteger(mapping.periodIndex)){const p=inspection.paragraphs.find(p=>p.text.includes(mapping.periodText));if(p)mapping.periodIndex=p.index;}const l={id,...(isExcel?{}:{wordIdentity:inspection.wordIdentity}),format:isExcel?'xlsx':'docx',excelTemplateKey:isExcel?`excel-templates/${id}.xlsx`:null,name:m.name.trim(),client:m.client||'',code:m.code||'',companyCamProjectId:m.companyCamProjectId||old?.companyCamProjectId||'',companyCamProjectName:old?.companyCamProjectName||'',timeZone:m.timeZone,templateName:file.name,templateKey:`templates/${id}/${crypto.randomUUID()}.docx`,mapping,createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString(),inspection:{bodyImageCount:inspection.bodyImageCount,photoTables:inspection.tables.filter(t=>mapping.photoTableIndices?.includes(t.index))}};
   if(isExcel)await b.put(l.excelTemplateKey,original);await b.put(l.templateKey,bytes);await put(b,`locations/${id}.json`,l);return json(l,201);
+ }
+ const nameRoute=path.match(/^\/api\/locations\/([\w-]+)\/word-name$/);
+ if (nameRoute && req.method==='POST') {
+  const key=`locations/${nameRoute[1]}.json`;
+  const location=await get(b,key);
+  if (!location) return json({error:'Project not found'},404);
+  if (location.format==='xlsx'||location.wordIdentity) return json(location);
+  const master=await b.get(location.templateKey);
+  if (!master) return json({error:'Saved Word master is unavailable'},404);
+  const identity=readWordIdentity(new Uint8Array(await master.arrayBuffer()));
+  const current=await get(b,key);
+  if (!current || current.templateKey!==location.templateKey) return json({error:'The master changed. Retry the update.'},409);
+  current.wordIdentity=identity;
+  await put(b,key,current);
+  return json(current);
  }
  const lm=path.match(/^\/api\/locations\/([\w-]+)\/(photos|template)$/);
  if(lm){const [,id,kind]=lm,l=await get(b,`locations/${id}.json`);if(!l)return json({error:'Project not found'},404);

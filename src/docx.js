@@ -1,5 +1,6 @@
 import {zipSync,unzipSync,strToU8,strFromU8} from 'fflate';
 import {DOMParser,XMLSerializer} from '@xmldom/xmldom';
+import {applyMonthlyMaintenance} from './monthly-maintenance.js';
 const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const R='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const A='http://schemas.openxmlformats.org/drawingml/2006/main';
@@ -19,13 +20,35 @@ function readPackage(bytes){
   if(Object.keys(files).some(k=>/vbaProject|activeX|embeddings\//i.test(k)))throw new Error('Use a .docx without macros, embedded files, or ActiveX.');
   return files;
 }
+function wordIdentity(doc) {
+  const locationLabel = /^(?:location|site name)\s*:?$/i;
+  const jobLabel = /^job\s*(?:code|number|no\.?|#)\s*:?$/i;
+  const result = {location:'',jobCode:''};
+  for (const row of nodes(doc,W,'tr')) {
+    const values = Array.from(row.childNodes).filter(cell=>cell.localName==='tc')
+      .map(cell=>nodes(cell,W,'p').map(text).join(' ').replace(/\s+/g,' ').trim());
+    for (let i=0;i+1<values.length;i++) {
+      const value=values[i+1];
+      if (!value || locationLabel.test(value) || jobLabel.test(value) || value.includes('{{')) continue;
+      if (!result.location && locationLabel.test(values[i])) result.location=value;
+      if (!result.jobCode && jobLabel.test(values[i]) && /\d/.test(value)) result.jobCode=value;
+    }
+    if (result.location && result.jobCode) break;
+  }
+  return result;
+}
+export function readWordIdentity(bytes){
+  const files=unzipSync(bytes,{filter:entry=>entry.name==='word/document.xml'&&entry.originalSize<=40*1024*1024});
+  if(!files['word/document.xml'])throw Error('Cannot read the project fields from this master.');
+  return wordIdentity(parse(strFromU8(files['word/document.xml'])));
+}
 export function inspectTemplate(bytes){
   const files=readPackage(bytes), doc=parse(strFromU8(files['word/document.xml']));
   const paragraphs=nodes(doc,W,'p').map((p,index)=>({index,text:text(p),images:nodes(p,W,'drawing').length+nodes(p,W,'pict').length}));
   const fullText=paragraphs.map(p=>p.text).join('\n');
   const body=nodes(doc,W,'body')[0];
   const tables=Array.from(body.childNodes).filter(n=>n.localName==='tbl').map((t,index)=>({index,images:nodes(t,W,'drawing').length,rows:nodes(t,W,'tr').length,columns:nodes(nodes(t,W,'tr')[0],W,'tc').length,text:text(t).slice(0,150)}));
-  return {paragraphs:paragraphs.filter(p=>p.text||p.images),tokens:[...new Set(fullText.match(/\{\{[A-Z_]+\}\}/g)||[])],bodyImageCount:paragraphs.reduce((a,p)=>a+p.images,0),tables};
+  return {wordIdentity:wordIdentity(doc),paragraphs:paragraphs.filter(p=>p.text||p.images),tokens:[...new Set(fullText.match(/\{\{[A-Z_]+\}\}/g)||[])],bodyImageCount:paragraphs.reduce((a,p)=>a+p.images,0),tables};
 }
 export function appendPhotoSection(bytes,referenceBytes){
  const files=readPackage(bytes),doc=parse(strFromU8(files['word/document.xml'])),reference=readPackage(referenceBytes),ref=parse(strFromU8(reference['word/document.xml']));
@@ -131,6 +154,7 @@ export function generateReport(templateBytes, mapping, values, photos){
     if(part!=='word/document.xml')files[part]=strToU8(serialize(x));
   }
   if(Number.isInteger(mapping.summaryIndex)){const p=paragraphs[mapping.summaryIndex];if(!p)throw new Error('Summary mapping is no longer valid.');setParagraph(p,values.WORK_SUMMARY);}
+  applyMonthlyMaintenance(doc,values.REPORT_MONTH || values.REPORT_PERIOD);
   if(mapping.photoTableIndices?.length){if(/\{\{(?!PHOTOS)[A-Z_]+\}\}/.test(nodes(doc,W,'p').map(text).join('\n')))throw Error('An unmapped placeholder remains in the master.');return generateTableReport(files,doc,mapping,photos);}
   let anchor, prototype, captionPrototype;
   if(Number.isInteger(mapping.photoIndex)){

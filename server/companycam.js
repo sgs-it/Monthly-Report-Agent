@@ -43,7 +43,17 @@ export function createCompanyCamHandler({env,fetchImpl=fetch,normalize=normalize
     if(!env.COMPANYCAM_API_KEY)return json({configured:false,connected:false,message:'Add COMPANYCAM_API_KEY in Vercel and redeploy.'});
     try{const result=await call('/projects',{limit:1});if(!Array.isArray(result.data))throw new ConnectorError('CompanyCam returned an unexpected project response.',502);return json({configured:true,connected:true,message:'Connected · on-device photo captions'});}catch(e){return json({configured:true,connected:false,message:e.message});}
    }
-   if(path==='/api/companycam/projects'&&request.method==='GET'){const p=page(await call('/projects',{limit:100,after:cursor(url.searchParams.get('after'))}));return json({projects:p.items.map(p=>({id:String(p.id),name:String(p.name||p.id)})),next:p.next});}
+   if(path==='/api/companycam/projects'&&request.method==='GET'){
+    const query=(url.searchParams.get('query')||'').trim();
+    if(query.length>200)throw new ConnectorError('Search text must be under 201 characters.');
+    const params={limit:100,after:cursor(url.searchParams.get('after'))};
+    if(query)params.query=query;
+    const results=page(await call(query?'/projects/search':'/projects',params));
+    return json({projects:results.items.map(project=>{
+     const address=project.address||{};
+     return {id:String(project.id),name:String(project.name||project.id),address:[address.street_address_1,address.street_address_2,address.city,address.state].filter(Boolean).join(', ')};
+    }),next:results.next});
+   }
    if(path==='/api/companycam/link'&&request.method==='POST'){
     const d=await request.json(),l=await location(bucket,d.locationId),remoteId=id(d.companyCamProjectId),remote=(await call('/projects/'+remoteId)).data;
     if(String(remote?.id)!==remoteId)throw new ConnectorError('CompanyCam returned a different project.',502);
