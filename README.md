@@ -24,6 +24,8 @@ Only relevant work photos from the chosen project and capture month are eligible
 
 Add COMPANYCAM_API_KEY as a Production Secret in Vercel, then deploy this source. The app verifies the key through CompanyCam and shows its connection status. Open Integrations to link the site with its CompanyCam project. Choose Generate monthly report on the dashboard to select the month and import photos. Review the imported work photos and their captions before generating a report. Photo pagination continues until all pages are processed; interrupted imports can be retried without overwriting existing review decisions. The key stays on the server. No key is included in this package. See VERCEL_SETUP.md for details and troubleshooting.
 
+Use Export linked reports (.zip) on the dashboard or Reports to sync CompanyCam and generate one Word report per linked site for a chosen month. Excel sites also include their workbook. Review photos for any listed sites and retry to complete the archive. The master library consolidates repeated unlinked imports with the same site, job number, and master filename. Word photos fill their grid by center cropping.
+
 ReportGen shows live workspace totals on the dashboard. A generated report opens in Word preview, with a download button. You can reopen previews from Reports.
 
 The browser suggests approved captions using a locally running image model. Review the activity before including each photo. Storage in this package continues to use private Vercel Blob; Supabase migration is not included.

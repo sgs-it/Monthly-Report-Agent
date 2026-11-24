@@ -1,3 +1,4 @@
+import {masterIdentity,masterLibrary,masterId} from '../src/master-library.js';
 import {allowedCaption} from '../src/captions.js';
 import {excelToWordTemplate,generateExcelReport} from '../src/xlsx.js';
 import {readWordIdentity,inspectTemplate,generateReport,appendPhotoSection} from '../src/docx.js';
@@ -7,6 +8,26 @@ const get=async(b,k)=>(await b.get(k))?.json();
 const put=(b,k,v)=>b.put(k,JSON.stringify(v),{httpMetadata:{contentType:'application/json'}});
 async function records(b,prefix){let cursor,keys=[];do{const r=await b.list({prefix,cursor,limit:1000});keys.push(...r.objects);cursor=r.truncated?r.cursor:undefined;}while(cursor);const out=[];for(let i=0;i<keys.length;i+=20)out.push(...await Promise.all(keys.slice(i,i+20).map(x=>get(b,x.key))));return out.filter(Boolean);}
 async function projectPhotos(b,l){return (await records(b,`photos/${l.id}/`)).filter(p=>p.source!=='companycam'||p.companyCamProjectId===l.companyCamProjectId);}
+async function removeDuplicateMasters(bucket){
+ const sites=await records(bucket,'locations/'),{duplicates}=masterLibrary(sites);
+ for(const {site,keep} of duplicates.slice(0,5)){
+  const key=`locations/${site.id}.json`,stored=await bucket.get(key);
+  if(!stored)continue;
+  const current=await stored.json(),winner=await get(bucket,`locations/${keep.id}.json`);
+  if(!winner||current.companyCamProjectId||masterIdentity(current)!==masterIdentity(winner))continue;
+  for(const photo of await records(bucket,`photos/${site.id}/`)){
+   const target=`photos/${keep.id}/${photo.id}.json`;
+   if(!(await get(bucket,target)))await put(bucket,target,{...photo,projectId:keep.id});
+  }
+  // Keep historical reports and images. Only remove files owned by the redundant master.
+  await bucket.delete(key,stored.etag);
+  const owned=[current.templateKey,current.excelTemplateKey].filter(path=>path&&
+   (path.startsWith(`templates/${site.id}/`)||path===`excel-templates/${site.id}.xlsx`||path.startsWith(`excel-templates/${site.id}/`))&&
+   !sites.some(l=>l.id!==site.id&&(l.templateKey===path||l.excelTemplateKey===path)));
+  if(owned.length)await bucket.delete(owned);
+ }
+ return {remaining:duplicates.length>5};
+}
 async function handle(req,env){
  const url=new URL(req.url),path=url.pathname;
  const assets={'/':[__HTML__,'text/html'],'/app.js':[__CLIENT__,'text/javascript'],'/style.css':[__CSS__,'text/css'],'/manual':[__MANUAL__,'text/html']};
@@ -14,17 +35,39 @@ async function handle(req,env){
  if(!path.startsWith('/api/'))return json({error:'Not found'},404);
  if(req.method!=='GET'&&req.headers.get('Origin')&&req.headers.get('Origin')!==url.origin)return json({error:'Cross-site request rejected'},403);
  const b=env.BUCKET;if(!b)return json({error:'Project storage is not configured.'},503);
- if(path==='/api/state')return json({locations:(await records(b,'locations/')).sort((a,b)=>a.name.localeCompare(b.name)),reports:(await records(b,'reports/')).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),currentMonth:currentMonth()});
+ if(path==='/api/state'){
+  const library=masterLibrary(await records(b,'locations/'));
+  return json({locations:library.locations,duplicateMasters:library.duplicates.length,reports:(await records(b,'reports/')).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)),currentMonth:currentMonth()});
+ }
+ if(path==='/api/masters/consolidate'&&req.method==='POST')return json(await removeDuplicateMasters(b));
  if(path==='/api/templates/inspect'&&req.method==='POST'){const bytes=new Uint8Array(await req.arrayBuffer()),excel=req.headers.get('x-template-format')==='xlsx';return json({...inspectTemplate(excel?excelToWordTemplate(bytes,'Monthly reporting log'):bytes),excel});}
  if(path==='/api/locations'&&req.method==='POST'){
   const f=await req.formData(),file=f.get('template'),m=JSON.parse(f.get('metadata')||'{}');
   if(!m.name?.trim()||m.name.length>200)throw Error('Enter a project name under 200 characters.');new Intl.DateTimeFormat('en',{timeZone:m.timeZone});
   if(!(file instanceof File)||!(/\.(docx|xlsx)$/i.test(file.name)))throw Error('Upload a Word .docx master template.');
-  const original=new Uint8Array(await file.arrayBuffer()),isExcel=/\.xlsx$/i.test(file.name);let bytes=isExcel?excelToWordTemplate(original,m.name):original;let inspection=inspectTemplate(bytes);if(!inspection.bodyImageCount&&!inspection.tokens.includes('{{PHOTOS}}')){const donor=(await records(b,'locations/')).find(l=>l.inspection?.photoTables?.length);if(donor){const f=await b.get(donor.templateKey);bytes=appendPhotoSection(bytes,new Uint8Array(await f.arrayBuffer()));inspection=inspectTemplate(bytes);m.mapping={...m.mapping,photoTableIndices:inspection.tables.filter(t=>t.images>=2).map(t=>t.index)};}}const id=m.id&&/^[\w-]+$/.test(m.id)?m.id:crypto.randomUUID();
+  const original=new Uint8Array(await file.arrayBuffer()),isExcel=/\.xlsx$/i.test(file.name);let bytes=isExcel?excelToWordTemplate(original,m.name):original;let inspection=inspectTemplate(bytes);if(!inspection.bodyImageCount&&!inspection.tokens.includes('{{PHOTOS}}')){const donor=(await records(b,'locations/')).find(l=>l.inspection?.photoTables?.length);if(donor){const f=await b.get(donor.templateKey);bytes=appendPhotoSection(bytes,new Uint8Array(await f.arrayBuffer()));inspection=inspectTemplate(bytes);m.mapping={...m.mapping,photoTableIndices:inspection.tables.filter(t=>t.images>=2).map(t=>t.index)};}}const identity=masterIdentity({templateName:file.name,name:m.name,wordIdentity:isExcel?null:inspection.wordIdentity,code:m.code});
+  const explicitId=m.id&&/^[\w-]+$/.test(m.id)?m.id:'';
+  if(!explicitId){
+   const existing=masterLibrary(await records(b,'locations/')).locations.find(l=>masterIdentity(l)===identity);
+   if(existing)return json(existing);
+  }
+  const id=explicitId||await masterId(identity);
   const old=await get(b,`locations/${id}.json`),mapping=m.mapping||{photoTableIndices:inspection.tables.filter(t=>t.images>=2).map(t=>t.index),periodText:m.periodText||''};
+  if(explicitId&&!old)return json({error:'Reopen the master library to update the active site.'},404);
   if(!mapping.photoTableIndices?.length&&!inspection.tokens.includes('{{PHOTOS}}')&&!Number.isInteger(mapping.photoIndex))throw Error('No photo layout found. Map a photo table or add a {{PHOTOS}} paragraph in Word.');
-  if(mapping.periodText&&!Number.isInteger(mapping.periodIndex)){const p=inspection.paragraphs.find(p=>p.text.includes(mapping.periodText));if(p)mapping.periodIndex=p.index;}const l={id,...(isExcel?{}:{wordIdentity:inspection.wordIdentity}),format:isExcel?'xlsx':'docx',excelTemplateKey:isExcel?`excel-templates/${id}.xlsx`:null,name:m.name.trim(),client:m.client||'',code:m.code||'',companyCamProjectId:m.companyCamProjectId||old?.companyCamProjectId||'',companyCamProjectName:old?.companyCamProjectName||'',timeZone:m.timeZone,templateName:file.name,templateKey:`templates/${id}/${crypto.randomUUID()}.docx`,mapping,createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString(),inspection:{bodyImageCount:inspection.bodyImageCount,photoTables:inspection.tables.filter(t=>mapping.photoTableIndices?.includes(t.index))}};
-  if(isExcel)await b.put(l.excelTemplateKey,original);await b.put(l.templateKey,bytes);await put(b,`locations/${id}.json`,l);return json(l,201);
+  if(mapping.periodText&&!Number.isInteger(mapping.periodIndex)){const p=inspection.paragraphs.find(p=>p.text.includes(mapping.periodText));if(p)mapping.periodIndex=p.index;}const l={id,...(isExcel?{}:{wordIdentity:inspection.wordIdentity}),format:isExcel?'xlsx':'docx',excelTemplateKey:isExcel?`excel-templates/${id}/${crypto.randomUUID()}.xlsx`:null,name:m.name.trim(),client:m.client||'',code:m.code||'',companyCamProjectId:m.companyCamProjectId||old?.companyCamProjectId||'',companyCamProjectName:old?.companyCamProjectName||'',timeZone:m.timeZone,templateName:file.name,templateKey:`templates/${id}/${crypto.randomUUID()}.docx`,mapping,createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString(),inspection:{bodyImageCount:inspection.bodyImageCount,photoTables:inspection.tables.filter(t=>mapping.photoTableIndices?.includes(t.index))}};
+  if(isExcel)await b.put(l.excelTemplateKey,original);
+  await b.put(l.templateKey,bytes);
+  const key=`locations/${id}.json`;
+  if(!explicitId&&b.create){
+   try{await b.create(key,JSON.stringify(l));}
+   catch(error){
+    const existing=await get(b,key);if(!existing)throw error;
+    if(existing.templateKey!==l.templateKey)await b.delete([l.templateKey,l.excelTemplateKey].filter(Boolean));
+    return json(existing);
+   }
+  }else{await put(b,key,l);}
+  return json(l,201);
  }
  const nameRoute=path.match(/^\/api\/locations\/([\w-]+)\/word-name$/);
  if (nameRoute && req.method==='POST') {
@@ -75,10 +118,16 @@ async function handle(req,env){
  if(path==='/api/reports'&&req.method==='POST'){
   const d=await req.json();if(!/^[\w-]+$/.test(d.projectId||'')||!validMonth(d.month))throw Error('Choose a project and report month.');if(d.reviewed!==true)throw Error('Review monthly details before generating.');
   const l=await get(b,`locations/${d.projectId}.json`);if(!l)return json({error:'Project not found'},404);
-  const selection=selectPhotos(await projectPhotos(b,l),l.id,d.month,l.timeZone);if(!selection.photos.length)throw Error('No eligible photos for this project and month. Add captions and mark relevant work photos.');if(!d.summary?.trim())throw Error('Enter this month’s work summary.');
+  if(d.batchId&&(!/^[a-f0-9-]{36}$/i.test(d.batchId)||!l.companyCamProjectId||l.companyCamProjectId!==d.linkedProjectId))throw Error('The CompanyCam link changed. Reopen the linked-project export.');
+  const batchReportId=d.batchId?'batch-'+(await masterId(JSON.stringify([d.batchId,d.month,l.id,l.companyCamProjectId]))).slice(7):'';
+  if(batchReportId){const previous=await get(b,`reports/${batchReportId}.json`);if(previous)return json(previous);}
+  const selection=selectPhotos(await projectPhotos(b,l),l.id,d.month,l.timeZone);if(!selection.photos.length)throw Error('No eligible photos for this project and month. Add captions and mark relevant work photos.');if(d.batchId){
+   d.summary=[...new Set(selection.photos.map(p=>p.caption))].join('; ')+'.';
+  }
+  if(!d.summary?.trim())throw Error('Enter this month’s work summary.');
   const photos=[];for(const p of selection.photos){const f=await b.get(`images/${p.id}.jpg`);if(!f)throw Error('Selected photo is missing.');photos.push({...p,bytes:new Uint8Array(await f.arrayBuffer())});}
   const t=await b.get(l.templateKey),period=periodLabel(d.month),values={REPORT_PERIOD:period,REPORT_MONTH:period.split(' ')[0],REPORT_YEAR:d.month.slice(0,4),LOCATION:l.name,WORK_SUMMARY:d.summary.trim()};
-  const bytes=generateReport(new Uint8Array(await t.arrayBuffer()),l.mapping,values,photos),id=crypto.randomUUID();
+  const bytes=generateReport(new Uint8Array(await t.arrayBuffer()),l.mapping,values,photos),id=batchReportId||crypto.randomUUID();
   const record={id,projectId:l.id,projectName:l.name,month:d.month,period,photoCount:photos.length,relevantCount:selection.relevantCount,limit:selection.limit,photoIds:photos.map(p=>p.id),summary:d.summary.trim(),templateName:l.templateName,createdAt:new Date().toISOString(),filename:`${l.name.replace(/[^a-zA-Z0-9_-]/g,'_')}_${d.month}.docx`};
   if(l.excelTemplateKey){const original=await b.get(l.excelTemplateKey);const excel=generateExcelReport(new Uint8Array(await original.arrayBuffer()),period,photos,l.name);await b.put(`documents/${id}.xlsx`,excel);record.excelFilename=record.filename.replace(/\.docx$/,'.xlsx');}await b.put(`documents/${id}.docx`,bytes);await put(b,`reports/${id}.json`,record);return json(record,201);
  }

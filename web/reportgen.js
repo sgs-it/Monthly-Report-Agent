@@ -1,10 +1,10 @@
-import {renderAsync} from 'docx-preview';
+import {parseAsync,renderDocument} from 'docx-preview';
 import {projectLabel} from '../src/project-name.js';
 
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const icon=name=>`<svg class="rg-icon" aria-hidden="true"><use href="#rg-icon-${name}"></use></svg>`;
 
-export function dashboard(state,month,period,rows) {
+export function dashboard(state,month,period,rows,batchButton='') {
   const hour=new Date().getHours();
   const greeting=hour<12?'Good morning':hour<18?'Good afternoon':'Good evening';
   const actions=[['integrations','link','Connect CompanyCam'],['upload','file-up','Upload master file'],['photos','file-plus-2','Generate monthly report']];
@@ -12,7 +12,7 @@ export function dashboard(state,month,period,rows) {
   return `<div class="welcome"><div><h1>${greeting}</h1><p>Generate monthly site reports from your master files and CompanyCam photos.</p></div><div class="garden-detail" aria-hidden="true"></div></div>
     <div class="action-grid">${actions.map(([page,symbol,name])=>`<button class="action-tile" ${page==='upload'?'data-add':'data-page="'+page+'"'}><span class="action-symbol">${icon(symbol)}</span><strong>${name}</strong><span class="action-arrow">${icon('arrow-up-right')}</span></button>`).join('')}</div>
     <div class="metric-grid">${stats.map(([symbol,value,label])=>`<div class="metric"><span>${icon(symbol)}</span><div><strong>${value}</strong><small>${escape(label)}</small></div></div>`).join('')}</div>
-    <section class="section-card"><div class="section-top"><h2>Projects</h2><button class="text-button" data-page="projects">View all projects →</button></div>${state.locations.length?rows(state.locations.slice(0,5)):'<div class="empty"><h3>Add your first site</h3><p>Upload its master file to start a report.</p><button class="secondary" data-add>Upload master file</button></div>'}</section>`;
+    <section class="section-card"><div class="section-top"><h2>Projects</h2><div class="row-actions">${batchButton}<button class="text-button" data-page="projects">View all projects →</button></div></div>${state.locations.length?rows(state.locations.slice(0,5)):'<div class="empty"><h3>Add your first site</h3><p>Upload its master file to start a report.</p><button class="secondary" data-add>Upload master file</button></div>'}</section>`;
 }
 
 export function integrations(sites,selected,connection){
@@ -48,7 +48,14 @@ export function preparePreviewDialog(){
       const ready=new Promise(resolve=>frame.onload=resolve);
       frame.srcdoc='<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src &apos;none&apos;; img-src data: blob:; style-src &apos;unsafe-inline&apos;; font-src data: blob:"><style>body{margin:0;background:#edf1ef}a{pointer-events:none}</style><body></body>';
       stage.replaceChildren(frame);await ready;if(version!==revision)return;
-      await renderAsync(blob,frame.contentDocument.body,frame.contentDocument.head,{renderAltChunks:false,useBase64URL:true});
+      const options={renderAltChunks:false,useBase64URL:true};
+      const documentModel=await parseAsync(blob,options);
+      function fitGridImages(node){
+        if(node.type==='image'&&node.src?.startsWith('rIdPhoto'))node.cssStyle={...node.cssStyle,'object-fit':'cover'};
+        for(const child of node.children||[])fitGridImages(child);
+      }
+      fitGridImages(documentModel.documentPart.body);
+      await renderDocument(documentModel,frame.contentDocument.body,frame.contentDocument.head,options);
       if(version!==revision)return;
       const pages=frame.contentDocument.querySelectorAll('section.docx');
       const fit=()=>{if(pages.length){frame.contentDocument.body.style.zoom='1';const w=pages[0].getBoundingClientRect().width+60;frame.contentDocument.body.style.zoom=String(Math.min(1,frame.clientWidth/w));}};

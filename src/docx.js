@@ -81,9 +81,25 @@ function setParagraph(p,value){const ts=nodes(p,W,'t');if(ts.length){ts[0].textC
 function resetPictureIds(root, serial){
   for(const e of [...nodes(root,WP,'docPr'),...nodes(root,'http://schemas.openxmlformats.org/drawingml/2006/picture','cNvPr')]){e.setAttribute('id',String(serial.next++));e.setAttribute('name',`Report photo ${serial.next}`);}
 }
-function generateTableReport(files,doc,mapping,photos){
+function fillGridPhoto(cell,photo,width,height){
+ const box=width/height,source=photo.width/photo.height;
+ const horizontal=source>box?Math.round(50000*(1-box/source)):0;
+ const vertical=source<box?Math.round(50000*(1-source/box)):0;
+ for(const fill of nodes(cell,'http://schemas.openxmlformats.org/drawingml/2006/picture','blipFill')){
+  for(const old of [...nodes(fill,A,'srcRect'),...nodes(fill,A,'tile'),...nodes(fill,A,'stretch')])old.parentNode.removeChild(old);
+  const crop=fill.ownerDocument.createElementNS(A,'a:srcRect');
+  for(const [key,value] of Object.entries({l:horizontal,r:horizontal,t:vertical,b:vertical}))crop.setAttribute(key,String(value));
+  fill.appendChild(crop);
+  const stretch=fill.ownerDocument.createElementNS(A,'a:stretch');
+  stretch.appendChild(fill.ownerDocument.createElementNS(A,'a:fillRect'));fill.appendChild(stretch);
+ }
+ for(const e of [...nodes(cell,WP,'extent'),...nodes(cell,A,'xfrm').flatMap(x=>nodes(x,A,'ext'))]){
+  e.setAttribute('cx',String(width));e.setAttribute('cy',String(height));
+ }
+}
+function generateTableReport(files,doc,mapping,photos,insertedTable){
   const body=nodes(doc,W,'body')[0],tables=Array.from(body.childNodes).filter(n=>n.localName==='tbl');
-  const selected=mapping.photoTableIndices.map(i=>tables[i]);
+  const selected=insertedTable?[insertedTable]:mapping.photoTableIndices.map(i=>tables[i]);
   if(selected.some(t=>!t))throw new Error('Photo table mapping is no longer valid.');
   const base=selected[0],rows=Array.from(base.childNodes).filter(n=>n.localName==='tr');
   const imageRow=rows.find(r=>nodes(r,W,'drawing').length),imageRowIndex=rows.indexOf(imageRow),captionRow=rows[imageRowIndex+1];
@@ -97,9 +113,13 @@ function generateTableReport(files,doc,mapping,photos){
   const types=parse(strFromU8(files['[Content_Types].xml']));
   if(!nodes(types,CT,'Default').some(e=>e.getAttribute('Extension')==='jpg')){const e=types.createElementNS(CT,'Default');e.setAttribute('Extension','jpg');e.setAttribute('ContentType','image/jpeg');types.documentElement.appendChild(e);}
   const serial={next:Math.max(100,...nodes(doc,WP,'docPr').map(e=>Number(e.getAttribute('id'))||0))+1};
-  const pairCount=Math.max(1,Math.floor(rows.length/2)),perPage=columnCount*pairCount;
+  const perPage=columnCount*Math.max(1,rows.filter(r=>nodes(r,W,'drawing').length).length);
+  const grid=nodes(base,W,'tblGrid')[0],columns=grid?nodes(grid,W,'gridCol'):[];
+  const firstBox=nodes(templatePhoto,WP,'extent')[0],height=Number(firstBox?.getAttribute('cy'))||2200000;
+  const parent=base.parentNode;
   for(let offset=0;offset<photos.length;offset+=perPage){
     const table=base.cloneNode(true);Array.from(table.childNodes).filter(n=>n.localName==='tr').forEach(r=>table.removeChild(r));
+    if(!offset)for(const heading of rows.slice(0,imageRowIndex))if(/^photographs?$/i.test(text(heading).trim()))table.appendChild(heading.cloneNode(true));
     for(let rowStart=offset;rowStart<Math.min(photos.length,offset+perPage);rowStart+=columnCount){
       const pics=imageRow.cloneNode(true),caps=captionRow.cloneNode(true);
       for(let c=0;c<columnCount;c++){
@@ -114,18 +134,20 @@ function generateTableReport(files,doc,mapping,photos){
         files[`word/media/${filename}`]=photo.bytes;
         const rel=rels.createElementNS(REL,'Relationship');rel.setAttribute('Id',id);rel.setAttribute('Type',`${R}/image`);rel.setAttribute('Target',`media/${filename}`);rels.documentElement.appendChild(rel);
         nodes(pc,A,'blip').forEach(n=>{n.setAttributeNS(R,'r:embed',id);n.removeAttributeNS(R,'link');});
-        const ext=nodes(pc,WP,'extent')[0],maxW=Number(ext?.getAttribute('cx'))||1800000,maxH=Number(ext?.getAttribute('cy'))||1400000;
-        const scale=Math.min(maxW/photo.width,maxH/photo.height),cx=Math.round(photo.width*scale),cy=Math.round(photo.height*scale);
-        for(const e of [...nodes(pc,WP,'extent'),...nodes(pc,A,'ext')]){e.setAttribute('cx',String(cx));e.setAttribute('cy',String(cy));}
+        const tcMar=nodes(pc,W,'tcMar')[0]||nodes(base,W,'tblCellMar')[0];
+        const margin=side=>tcMar?Number(nodes(tcMar,W,side)[0]?.getAttributeNS(W,'w')??72):72;
+        const cellWidth=Number(columns[c]?.getAttributeNS(W,'w'));
+        const width=cellWidth>margin('left')+margin('right')?Math.round((cellWidth-margin('left')-margin('right'))*635):Number(firstBox?.getAttribute('cx'))||1650000;
+        fillGridPhoto(pc,photo,width,height);
         nodes(pc,WP,'docPr').forEach(e=>e.setAttribute('descr',photo.caption));resetPictureIds(pc,serial);
         const cp=nodes(cc,W,'p');if(cp.length){setParagraph(cp[0],photo.caption);cp.slice(1).forEach(p=>p.parentNode.removeChild(p));}
       }
       table.appendChild(pics);table.appendChild(caps);
     }
-    body.insertBefore(table,base);
+    parent.insertBefore(table,base);
   }
   // Remove only the mapped old photo region, including intervening old page breaks.
-  let n=base;const last=selected.at(-1),selectedSet=new Set(selected);while(n){const next=n.nextSibling;if(selectedSet.has(n)||(n.localName==='p'&&!text(n).trim()&&!nodes(n,W,'drawing').length))body.removeChild(n);if(n===last)break;n=next;}
+  let n=base;const last=selected.at(-1),selectedSet=new Set(selected);while(n){const next=n.nextSibling;if(selectedSet.has(n)||(n.localName==='p'&&!text(n).trim()&&!nodes(n,W,'drawing').length))parent.removeChild(n);if(n===last)break;n=next;}
   files['word/document.xml']=strToU8(serialize(doc));files[relPath]=strToU8(serialize(rels));files['[Content_Types].xml']=strToU8(serialize(types));
   return finishPackage(files);
 }
@@ -169,35 +191,24 @@ export function generateReport(templateBytes, mapping, values, photos){
     if(text(anchor).trim()!=='{{PHOTOS}}')throw new Error('{{PHOTOS}} must be the only text in its paragraph.');
     prototype=parse(`<w:p xmlns:w="${W}" xmlns:r="${R}" xmlns:wp="${WP}" xmlns:a="${A}" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:pPr><w:keepNext/><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline><wp:extent cx="5486400" cy="3657600"/><wp:docPr id="1" name="Photo"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="Photo"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdPhoto"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="5486400" cy="3657600"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`).documentElement;
   }
-  const relPath='word/_rels/document.xml.rels';
-  const rels=parse(files[relPath]?strFromU8(files[relPath]):`<Relationships xmlns="${REL}"/>`);
-  const types=parse(strFromU8(files['[Content_Types].xml']));
-  if(!nodes(types,CT,'Default').some(e=>e.getAttribute('Extension')==='jpg')){const e=types.createElementNS(CT,'Default');e.setAttribute('Extension','jpg');e.setAttribute('ContentType','image/jpeg');types.documentElement.appendChild(e);}
-  const usedIds=new Set(nodes(rels,REL,'Relationship').map(e=>e.getAttribute('Id')));let rid=1;
-  const serial={next:Math.max(100,...nodes(doc,WP,'docPr').map(e=>Number(e.getAttribute('id'))||0))+1};
-  const picturePrototype=prototype.cloneNode(true), captionCopy=captionPrototype?.cloneNode(true);
-  for(const [i,photo] of photos.entries()){
-    while(usedIds.has(`rIdFieldPhoto${rid}`))rid++;const id=`rIdFieldPhoto${rid++}`;usedIds.add(id);
-    const filename=`report-${crypto.randomUUID()}.jpg`;files[`word/media/${filename}`]=photo.bytes;
-    const rel=rels.createElementNS(REL,'Relationship');rel.setAttribute('Id',id);rel.setAttribute('Type',`${R}/image`);rel.setAttribute('Target',`media/${filename}`);rels.documentElement.appendChild(rel);
-    const p=doc.importNode(picturePrototype,true);nodes(p,A,'blip').forEach(b=>{b.setAttributeNS(R,'r:embed',id);b.removeAttributeNS(R,'link');});
-    // Fit every image inside the master's picture box while keeping its aspect ratio.
-    const extent=nodes(p,WP,'extent')[0],maxW=Number(extent?.getAttribute('cx'))||5486400,maxH=Number(extent?.getAttribute('cy'))||3657600;
-    const scale=Math.min(maxW/photo.width,maxH/photo.height),cx=Math.round(photo.width*scale),cy=Math.round(photo.height*scale);
-    for(const e of [...nodes(p,WP,'extent'),...nodes(p,A,'ext')]){e.setAttribute('cx',String(cx));e.setAttribute('cy',String(cy));}
-    nodes(p,WP,'docPr').forEach(e=>e.setAttribute('descr',photo.caption));resetPictureIds(p,serial);
-    let caption=captionCopy?doc.importNode(captionCopy,true):parse(`<w:p xmlns:w="${W}"><w:pPr><w:spacing w:after="160"/><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/></w:rPr><w:t/></w:r></w:p>`).documentElement;
-    caption=doc.importNode(caption,true);setParagraph(caption,`${i+1}. ${photo.caption}`);
-    anchor.parentNode.insertBefore(p,anchor);anchor.parentNode.insertBefore(caption,anchor);
-  }
+  // Masters with a standalone photo placeholder receive a four-column grid.
+  const section=nodes(doc,W,'sectPr').at(-1),size=section&&nodes(section,W,'pgSz')[0],margins=section&&nodes(section,W,'pgMar')[0];
+  const usable=(Number(size?.getAttributeNS(W,'w'))||11906)-(Number(margins?.getAttributeNS(W,'left'))||1134)-(Number(margins?.getAttributeNS(W,'right'))||1134);
+  const width=Math.floor(usable/4),picWidth=(width-144)*635,picHeight=Math.round(picWidth*1.4);
+  const cell=content=>`<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/></w:tcPr>${content}</w:tc>`;
+  const pic=doc.importNode(prototype,true);
+  for(const ext of nodes(pic,WP,'extent')){ext.setAttribute('cx',String(picWidth));ext.setAttribute('cy',String(picHeight));}
+  const cap=captionPrototype?serialize(captionPrototype):'<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="18"/></w:rPr><w:t/></w:r></w:p>';
+  const borders=['top','left','bottom','right','insideH','insideV'].map(edge=>`<w:${edge} w:val="single" w:sz="4" w:color="444444"/>`).join('');
+  const row=cells=>'<w:tr><w:trPr><w:cantSplit/></w:trPr>'+cells+'</w:tr>';
+  const grid=parse(`<w:tbl xmlns:w="${W}"><w:tblPr><w:tblW w:w="${width*4}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="72" w:type="dxa"/><w:right w:w="72" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${('<w:gridCol w:w="'+width+'"/>').repeat(4)}</w:tblGrid>${row(cell(serialize(pic)).repeat(4))}${row(cell(cap).repeat(4))}</w:tbl>`).documentElement;
+  const inserted=doc.importNode(grid,true);
+  anchor.parentNode.insertBefore(inserted,anchor);
   if(captionPrototype?.parentNode)captionPrototype.parentNode.removeChild(captionPrototype);
   anchor.parentNode.removeChild(anchor);
-  // All old body sample pictures must be explicitly acknowledged or excluded at setup.
-  if(mapping.removeBodyPhotos) for(const p of paragraphs)if(p!==anchor&&p.parentNode&&nodes(p,W,'drawing').length)p.parentNode.removeChild(p);
-  const remainingText=nodes(doc,W,'p').map(text).join('\n');
-  if(/\{\{[A-Z_]+\}\}/.test(remainingText))throw new Error('The template contains an unmapped placeholder. Supported fields: REPORT_PERIOD, REPORT_MONTH, REPORT_YEAR, LOCATION, WORK_SUMMARY, PHOTOS.');
-  files['word/document.xml']=strToU8(serialize(doc));files[relPath]=strToU8(serialize(rels));files['[Content_Types].xml']=strToU8(serialize(types));
-  return finishPackage(files);
+  if(mapping.removeBodyPhotos)for(const p of paragraphs)if(p.parentNode&&nodes(p,W,'drawing').length)p.parentNode.removeChild(p);
+  if(/\{\{[A-Z_]+\}\}/.test(nodes(doc,W,'p').map(text).join('\n')))throw Error('An unmapped placeholder remains in the master.');
+  return generateTableReport(files,doc,mapping,photos,inserted);
 }
 export function demoTemplate(){
   const parts={

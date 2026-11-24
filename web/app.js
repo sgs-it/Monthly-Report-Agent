@@ -1,9 +1,10 @@
+import {prepareBatch} from './batch-reports.js';
 import {dashboard,integrations,preparePreviewDialog} from './reportgen.js';
 import {projectJobCode,projectLabel,filenameLocation,filenameJobCode} from '../src/project-name.js';
 import {currentMonth,periodLabel,selectPhotos,capturedMonth} from '../src/policy.js';
 import {prepareTemplateRequest} from './template-uploads.js';
 import {PREDEFINED_CAPTIONS} from '../src/captions.js';
-import {setupCompanyCam} from './companycam.js';
+import {setupCompanyCam,monthlyCompanyCamPages,companyCamPhotoImporter} from './companycam.js';
 const $=s=>document.querySelector(s),$$=s=>Array.from(document.querySelectorAll(s));
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let state={locations:[],reports:[]},page='overview',selectedId='',month=currentMonth(),photos=[],inspection=null,templateFile=null;
@@ -18,7 +19,27 @@ async function api(path,opts={}){opts=await prepareTemplateRequest(path,opts);co
 function toast(msg){$('#toast').textContent=msg;$('#toast').classList.remove('hidden');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').classList.add('hidden'),6500);}
 function error(e){console.error(e);toast(e.message);}
 async function busy(button,label,fn){const old=button.textContent;button.disabled=true;button.textContent=label;try{return await fn();}catch(e){error(e);}finally{button.disabled=false;button.textContent=old;}}
-async function refresh(){state=await api('/state');if(!state.locations.some(l=>l.id===selectedId))selectedId=state.locations[0]?.id||'';$('#project-count').textContent=state.locations.length;}
+let cleaningMasters=false;
+async function consolidateMasters(){
+ if(cleaningMasters)return;
+ cleaningMasters=true;
+ try{let result;do{result=await api('/masters/consolidate',{method:'POST'});}while(result.remaining);}
+ catch(err){toast('Duplicate master cleanup will retry when the workspace is reopened. '+err.message);}
+ finally{cleaningMasters=false;}
+}
+const openBatch=prepareBatch({api,getSites:()=>state.locations,async onReview(id,period){
+ try{selectedId=id;month=period;page='photos';await loadPhotos();render();}catch(err){error(err);}
+},async syncPhotos(site,period,onProgress){
+ const importOne=companyCamPhotoImporter(api);let count=0;
+ for await(const page of monthlyCompanyCamPages(api,site,period)){
+  for(const photo of page.photos){await importOne(site,period,photo);onProgress(++count);}
+ }
+},onReport(report){
+ state.reports=[report,...state.reports.filter(r=>r.id!==report.id)];
+ if(page==='reports')render();
+}});
+const batchButton=()=>`<button class="secondary" data-batch ${state.locations.some(l=>l.companyCamProjectId)?'':'disabled'}>Export linked reports (.zip)</button>`;
+async function refresh(){state=await api('/state');if(state.duplicateMasters)void consolidateMasters();if(!state.locations.some(l=>l.id===selectedId))selectedId=state.locations[0]?.id||'';$('#project-count').textContent=state.locations.length;}
 function location(){return state.locations.find(l=>l.id===selectedId);}
 const heading=(eyebrow,title,subtitle,action='')=>`<div class="page-heading"><div><p class="eyebrow">${eyebrow}</p><h1>${title}</h1><p class="muted">${subtitle}</p></div>${action}</div>`;
 const empty=(title,text,action='')=>`<div class="empty"><div class="empty-icon">▤</div><h3>${title}</h3><p>${text}</p>${action}</div>`;
@@ -35,7 +56,7 @@ function render(){
  $('#breadcrumbs').innerHTML=`Workspace <span>/</span> <strong>${titles[page]}</strong>`;
  if(page==='overview'){
   const period=currentMonth();
-  $('#content').innerHTML=dashboard(state,period,periodLabel(period),siteRows);
+  $('#content').innerHTML=dashboard(state,period,periodLabel(period),siteRows,batchButton());
  }else if(page==='integrations'){
   $('#content').innerHTML=integrations(state.locations,location(),companyCam.getStatus());
   $('#rg-check').onclick=()=>busy($('#rg-check'),'Checking…',companyCam.check);
@@ -62,7 +83,7 @@ function render(){
   });
   $('#import-folder').onclick=()=>$('#folder-files').click();$('#folder-files').onchange=e=>importFolder(e.target.files);
  }else if(page==='photos')renderPhotos();
- else $('#content').innerHTML=heading('REPORT ARCHIVE','Reports','Preview and download your monthly site reports.', '<button class="primary" data-page="photos">Generate report</button>')+`<section class="section-card">${state.reports.length?reportRows(state.reports):empty('Your reports will appear here','Choose a project, add eligible photos, and generate your first Word report.',`<button class="secondary" data-page="photos">Generate report</button>`)}</section>`;
+ else $('#content').innerHTML=heading('REPORT ARCHIVE','Reports','Preview and download your monthly site reports.', `<div class="row-actions">${batchButton()}<button class="primary" data-page="photos">Generate report</button></div>`)+`<section class="section-card">${state.reports.length?reportRows(state.reports):empty('Your reports will appear here','Choose a project, add eligible photos, and generate your first Word report.',`<button class="secondary" data-page="photos">Generate report</button>`)}</section>`;
  companyCam.render();
 }
 let readingJobNumbers=false;
@@ -110,6 +131,7 @@ function renderPhotos(){
 async function loadPhotos(){photos=selectedId?await api(`/locations/${selectedId}/photos`):[];}
 async function changePage(next){page=next;if(page==='photos'){month=currentMonth(location()?.timeZone||'Asia/Calcutta');await loadPhotos();}render();}
 document.addEventListener('click',async e=>{try{
+ if(e.target.closest('[data-batch]')){openBatch(month);return;}
  const pageButton=e.target.closest('[data-page]');if(pageButton){pageButton.closest('dialog')?.close();return await changePage(pageButton.dataset.page);}
  const link=e.target.closest('[data-link-project]');if(link){selectedId=link.dataset.linkProject;await changePage('integrations');if(companyCam.getStatus().connected)await companyCam.openLink();return;}
  const show=e.target.closest('[data-preview]');if(show){const r=state.reports.find(r=>r.id===show.dataset.preview);if(r)await preview(r);return;}
