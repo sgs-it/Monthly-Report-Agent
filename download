@@ -1,0 +1,18 @@
+dist/
+site.tar.gz
+node_modules/
+Report-Generation-main/
+Master report templates/
+docs/companycam-v1.yaml
+.local-data/
+qa/
+outputs/
+*.zip
+
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+.vercel/
+public/health.txt
