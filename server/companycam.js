@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import sharp from 'sharp';
+import {allowedCaption} from '../src/captions.js';
 import {capturedMonth,validMonth} from '../src/policy.js';
 
 const BASE='https://app.companycam.com/public_api/v1';
@@ -10,7 +11,7 @@ function cursor(value){if(value&&value.length>2000)throw new ConnectorError('Inv
 function month(value){if(!validMonth(value||''))throw new ConnectorError('Choose a valid reporting month.');return value;}
 function page(payload){if(!Array.isArray(payload.data)||typeof payload.meta?.has_next!=='boolean'||(payload.meta.has_next&&!payload.meta.next_cursor))throw new ConnectorError('CompanyCam returned incomplete pagination. Retry the import.',502);return {items:payload.data,next:payload.meta.has_next?String(payload.meta.next_cursor):null};}
 function capture(photo){const value=photo.captured_at;return typeof value==='string'&&Number.isFinite(Date.parse(value))?new Date(value).toISOString():null;}
-function caption(photo){return String(photo.description?.plain_text_content||'').slice(0,500);}
+function caption(photo){const value=photo.description?.plain_text_content?.trim();return allowedCaption(value)?value:'';}
 function imageURL(photo){
  const values=[...(photo.uris||[]).filter(x=>/web|large|original/i.test(x.type||'')),...(photo.uris||[])];
  for(const entry of values){try{const u=new URL(entry.url||entry.uri);if(u.protocol==='https:'&&!u.username&&!u.password&&!u.port&&(u.hostname==='companycam.imgix.net'||u.hostname.endsWith('.companycam.com')))return u.href;}catch{}}
@@ -40,7 +41,7 @@ export function createCompanyCamHandler({env,fetchImpl=fetch,normalize=normalize
   try{
    if(path==='/api/companycam/status'&&request.method==='GET'){
     if(!env.COMPANYCAM_API_KEY)return json({configured:false,connected:false,message:'Add COMPANYCAM_API_KEY in Vercel and redeploy.'});
-    try{const result=await call('/projects',{limit:1});if(!Array.isArray(result.data))throw new ConnectorError('CompanyCam returned an unexpected project response.',502);return json({configured:true,connected:true,message:'Connected · photo review required'});}catch(e){return json({configured:true,connected:false,message:e.message});}
+    try{const result=await call('/projects',{limit:1});if(!Array.isArray(result.data))throw new ConnectorError('CompanyCam returned an unexpected project response.',502);return json({configured:true,connected:true,message:'Connected · on-device photo captions'});}catch(e){return json({configured:true,connected:false,message:e.message});}
    }
    if(path==='/api/companycam/projects'&&request.method==='GET'){const p=page(await call('/projects',{limit:100,after:cursor(url.searchParams.get('after'))}));return json({projects:p.items.map(p=>({id:String(p.id),name:String(p.name||p.id)})),next:p.next});}
    if(path==='/api/companycam/link'&&request.method==='POST'){

@@ -1,3 +1,4 @@
+import {allowedCaption} from '../src/captions.js';
 import {excelToWordTemplate,generateExcelReport} from '../src/xlsx.js';
 import {inspectTemplate,generateReport,appendPhotoSection} from '../src/docx.js';
 import {selectPhotos,currentMonth,periodLabel,validMonth} from '../src/policy.js';
@@ -36,13 +37,23 @@ async function handle(req,env){
    if(!m.capturedAt||!Number.isFinite(new Date(m.capturedAt).getTime()))throw Error('Set the capture date. Upload dates are not capture dates.');
    if(!Number.isInteger(m.width)||!Number.isInteger(m.height)||m.width<1||m.height<1||m.width>2400||m.height>2400)throw Error('Invalid photo dimensions.');
    const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
+   if(!allowedCaption(m.caption??''))throw Error('Choose a caption from the supplied list.');
    const p={id:crypto.randomUUID(),projectId:id,name:String(m.name||file.name).slice(0,250),caption:String(m.caption||'').slice(0,500),activity:String(m.activity||'Work activity').slice(0,100),capturedAt:new Date(m.capturedAt).toISOString(),relevant:m.relevant===true,width:m.width,height:m.height,hash,source:'manual'};
    await b.put(`images/${p.id}.jpg`,bytes);await put(b,`photos/${id}/${p.id}.json`,p);return json(p,201);
   }
  }
  const pm=path.match(/^\/api\/photos\/([\w-]+)\/([\w-]+)$/);
  if(pm){const [,project,id]=pm,k=`photos/${project}/${id}.json`,p=await get(b,k);if(!p)return json({error:'Photo not found'},404);
-  if(req.method==='PATCH'){const d=await req.json();for(const k of ['caption','activity','relevant','capturedAt'])if(d[k]!==undefined)p[k]=d[k];if(typeof p.relevant!=='boolean'||!p.capturedAt||!Number.isFinite(new Date(p.capturedAt).getTime()))throw Error('Invalid photo details.');if(p.source==='companycam'){p.reviewRequired=!p.relevant;p.reviewedAt=new Date().toISOString();}p.caption=String(p.caption||'').slice(0,500);p.activity=String(p.activity||'').slice(0,100);await put(b,k,p);return json(p);}
+  if(req.method==='PATCH'){const d=await req.json();
+   if(d.caption!==undefined&&!allowedCaption(d.caption))throw Error('Choose a caption from the supplied list.');
+   if(d.captionSuggestion===true){
+    if(p.source!=='companycam'||p.captionChosen||(p.caption&&allowedCaption(p.caption)))return json(p);
+    if(!d.caption)return json(p);
+    p.caption=d.caption;p.captionSource='device';p.relevant=false;p.reviewRequired=true;
+    await put(b,k,p);return json(p);
+   }
+   if(d.caption!==undefined){p.captionChosen=true;p.captionSource='team';}
+   for(const k of ['caption','activity','relevant','capturedAt'])if(d[k]!==undefined)p[k]=d[k];if(typeof p.relevant!=='boolean'||!p.capturedAt||!Number.isFinite(new Date(p.capturedAt).getTime()))throw Error('Invalid photo details.');if(p.source==='companycam'){p.reviewRequired=!p.relevant;p.reviewedAt=new Date().toISOString();}p.caption=String(p.caption||'').slice(0,500);p.activity=String(p.activity||'').slice(0,100);await put(b,k,p);return json(p);}
   if(req.method==='DELETE'){await b.delete([k,`images/${id}.jpg`]);return json({ok:true});}
  }
  const im=path.match(/^\/api\/images\/([\w-]+)$/);if(im){const f=await b.get(`images/${im[1]}.jpg`);return f?new Response(f.body,{headers:{'Content-Type':'image/jpeg','Cache-Control':'private, max-age=3600'}}):json({error:'Not found'},404);}

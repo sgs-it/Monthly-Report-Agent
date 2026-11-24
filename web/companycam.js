@@ -1,4 +1,6 @@
 import {periodLabel} from '../src/policy.js';
+import {allowedCaption} from '../src/captions.js';
+import {suggestCaption} from './local-caption.js';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function setupCompanyCam({api,getContext,reload,toast,onError}){
  let status={connected:false,message:'Checking connection…'},projects=[],next=null,importing=false,stop=false;
@@ -15,15 +17,32 @@ export function setupCompanyCam({api,getContext,reload,toast,onError}){
  async function importPhotos(){
   const {location:l,month}=getContext();if(!l?.companyCamProjectId||importing)return;
   importing=true;stop=false;let imported=0,existing=0,excluded=0,after,complete=false;const seen=new Set();render();
+  let deviceAvailable=true,suggestions=0;
   try{
    do{
     const params=new URLSearchParams({locationId:l.id,month});if(after)params.set('after',after);
     const page=await api('/companycam/photos?'+params);
     excluded+=page.excluded;
-    for(const photo of page.photos){if(stop)break;const result=await api('/companycam/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({locationId:l.id,month,photoId:photo.id})});if(result.alreadyImported)existing++;else imported++;const progress=document.querySelector('#cc-import-progress');if(progress)progress.textContent=`${imported} imported · ${existing} already present · ${excluded} outside month or missing capture date`;}
+    for(const photo of page.photos){
+     if(stop)break;
+     const result=await api('/companycam/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({locationId:l.id,month,photoId:photo.id})});
+     if(result.alreadyImported)existing++;else imported++;
+     const saved=result.photo,progress=document.querySelector('#cc-import-progress');
+     if(deviceAvailable&&!saved.captionChosen&&(!saved.caption||!allowedCaption(saved.caption))){
+      if(progress)progress.textContent='Suggesting a caption on this device. First use downloads the image model.';
+      let suggestion;
+      try{suggestion=await suggestCaption(saved.id);}
+      catch{deviceAvailable=false;}
+      if(suggestion){
+       await api(`/photos/${l.id}/${saved.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({caption:suggestion,captionSuggestion:true})});
+       suggestions++;
+      }
+     }
+     if(progress)progress.textContent=`${imported} imported · ${existing} already present · ${suggestions} captions suggested · ${excluded} outside month or missing capture date`;
+    }
     if(stop)break;after=page.next;if(after){if(seen.has(after))throw Error('CompanyCam repeated a page. Import stopped; retry to resume.');seen.add(after);}
    }while(after);
-   complete=!stop;toast(`${complete?'Import complete':'Import stopped'}: ${imported} added, ${existing} already present. Review captions and mark work photos before generating.`);
+   complete=!stop;toast(`${complete?'Import complete':'Import stopped'}: ${imported} added, ${existing} already present. ${deviceAvailable?'Review the captions before generating.':'On-device captioning was unavailable. Choose captions from the list or retry the import.'}`);
   }catch(e){onError(Error(`Import incomplete: ${imported} added and saved. ${e.message} Retry to resume.`));}
   finally{importing=false;await reload();render();}
  }

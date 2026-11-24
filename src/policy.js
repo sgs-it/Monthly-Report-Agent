@@ -1,3 +1,4 @@
+import {allowedCaption} from './captions.js';
 export const DEFAULT_TIMEZONE = 'Asia/Calcutta';
 export function currentMonth(timeZone = DEFAULT_TIMEZONE, now = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {timeZone,year:'numeric',month:'2-digit'}).formatToParts(now).map(p=>[p.type,p.value]));
@@ -17,7 +18,7 @@ export function selectPhotos(photos, projectId, month, timeZone = DEFAULT_TIMEZO
   if (!validMonth(month)) throw new Error('Choose a valid report month.');
   const hashes = new Set();
   const relevant = photos.filter(p => {
-    if (p.projectId !== projectId || capturedMonth(p.capturedAt,timeZone) !== month || !p.relevant || !p.caption?.trim()) return false;
+    if (p.projectId !== projectId || capturedMonth(p.capturedAt,timeZone) !== month || !p.relevant || (!p.caption || !allowedCaption(p.caption))) return false;
     if (hashes.has(p.hash || p.id)) return false;
     hashes.add(p.hash || p.id); return true;
   });
