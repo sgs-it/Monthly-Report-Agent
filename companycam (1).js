@@ -3,11 +3,11 @@ import {periodLabel} from '../src/policy.js';
 import {allowedCaption} from '../src/captions.js';
 import {suggestCaption} from './local-caption.js';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-export function setupCompanyCam({api,getContext,reload,toast,onError}){
+export function setupCompanyCam({api,getContext,reload,toast,onError,onStatusChange}){
  let status={connected:false,message:'Checking connection…'},importing=false,stop=false;
  const pickProject=createProjectPicker({api,reload,toast,onError});
  const openLink=()=>pickProject(getContext().location);
- async function check(){status={connected:false,message:'Checking connection…'};render();try{status=await api('/companycam/status');}catch(e){status={connected:false,message:e.message};}render();}
+ async function check(){status={connected:false,message:'Checking connection…'};render();try{status=await api('/companycam/status');}catch(e){status={connected:false,message:e.message};}render();onStatusChange?.();}
  async function importPhotos(){
   const {location:l,month}=getContext();if(!l?.companyCamProjectId||importing)return;
   importing=true;stop=false;let imported=0,existing=0,excluded=0,after,complete=false;const seen=new Set();render();
@@ -49,5 +49,5 @@ export function setupCompanyCam({api,getContext,reload,toast,onError}){
   const controls=document.querySelector('#companycam-controls'),l=getContext().location;
   if(controls&&l){controls.innerHTML=`<div class="selection-summary"><strong>CompanyCam</strong> · ${esc(l.companyCamProjectName||l.companyCamProjectId||'No project linked')}<br><small>${esc(status.message)} Imported photos need a caption and work-activity review.</small><div class="dialog-actions"><button class="secondary" id="cc-check">Check connection</button><button class="secondary" id="cc-connect" ${!status.connected||importing?'disabled':''}>${l.companyCamProjectId?'Change linked project':'Link CompanyCam project'}</button><button class="primary" id="cc-import" ${!status.connected||!l.companyCamProjectId||importing?'disabled':''}>${importing?'Importing…':'Import '+esc(periodLabel(getContext().month))+' photos'}</button>${importing?'<button class="secondary" id="cc-stop">Stop import</button>':''}</div><p id="cc-import-progress" role="status"></p></div>`;controls.querySelector('#cc-check').onclick=check;controls.querySelector('#cc-connect').onclick=openLink;controls.querySelector('#cc-import').onclick=importPhotos;const cancel=controls.querySelector('#cc-stop');if(cancel)cancel.onclick=()=>{stop=true;cancel.disabled=true;cancel.textContent='Stopping…';};}
  }
- return {render,check};
+ return {render,check,openLink,getStatus:()=>status};
 }

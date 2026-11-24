@@ -10,7 +10,7 @@ This version runs the report backend in a Node.js Vercel Function and stores tem
 2. In Vercel, use Framework Other, Node.js 24.x, Build Command npm run build, Output Directory public, and Install Command npm ci.
 3. Connect a private Blob store with the read-write token option so BLOB_READ_WRITE_TOKEN is added to the project.
 4. Deploy and open your production website address. Anyone with the address can use the workspace.
-5. Import your masters from Projects & templates > Import template folder.
+5. Import your masters from Master files > Import template folder.
 
 The existing private Sites app and its files are separate. This package does not migrate that R2 library or modify the existing hosted app. Customer templates, photos, reports, node_modules, Git history, and secrets are excluded from the ZIP.
 
@@ -22,7 +22,9 @@ Only relevant work photos from the chosen project and capture month are eligible
 
 ## CompanyCam
 
-Add COMPANYCAM_API_KEY as a Production Secret in Vercel, then deploy this source. The app verifies the key through CompanyCam and shows its connection status. Open Photo library, choose your report project, link the exact CompanyCam project, select the month, and import its photos. Review the imported work photos and their captions before generating a report. Photo pagination continues until all pages are processed; interrupted imports can be retried without overwriting existing review decisions. The key stays on the server. No key is included in this package. See VERCEL_SETUP.md for details and troubleshooting.
+Add COMPANYCAM_API_KEY as a Production Secret in Vercel, then deploy this source. The app verifies the key through CompanyCam and shows its connection status. Open Integrations to link the site with its CompanyCam project. Choose Generate monthly report on the dashboard to select the month and import photos. Review the imported work photos and their captions before generating a report. Photo pagination continues until all pages are processed; interrupted imports can be retried without overwriting existing review decisions. The key stays on the server. No key is included in this package. See VERCEL_SETUP.md for details and troubleshooting.
+
+ReportGen shows live workspace totals on the dashboard. A generated report opens in Word preview, with a download button. You can reopen previews from Reports.
 
 The browser suggests approved captions using a locally running image model. Review the activity before including each photo. Storage in this package continues to use private Vercel Blob; Supabase migration is not included.
 

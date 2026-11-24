@@ -1,5 +1,6 @@
 import {zipSync,unzipSync,strToU8,strFromU8} from 'fflate';
 import {DOMParser,XMLSerializer} from '@xmldom/xmldom';
+import {applyMonthlyMaintenance} from './monthly-maintenance.js';
 const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const R='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const A='http://schemas.openxmlformats.org/drawingml/2006/main';
@@ -153,6 +154,7 @@ export function generateReport(templateBytes, mapping, values, photos){
     if(part!=='word/document.xml')files[part]=strToU8(serialize(x));
   }
   if(Number.isInteger(mapping.summaryIndex)){const p=paragraphs[mapping.summaryIndex];if(!p)throw new Error('Summary mapping is no longer valid.');setParagraph(p,values.WORK_SUMMARY);}
+  applyMonthlyMaintenance(doc,values.REPORT_MONTH || values.REPORT_PERIOD);
   if(mapping.photoTableIndices?.length){if(/\{\{(?!PHOTOS)[A-Z_]+\}\}/.test(nodes(doc,W,'p').map(text).join('\n')))throw Error('An unmapped placeholder remains in the master.');return generateTableReport(files,doc,mapping,photos);}
   let anchor, prototype, captionPrototype;
   if(Number.isInteger(mapping.photoIndex)){
