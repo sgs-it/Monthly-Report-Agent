@@ -40,8 +40,9 @@ test('rate limits and oversized source images surface errors without writing a p
  const rate=createCompanyCamHandler({env:{COMPANYCAM_API_KEY:'test'},fetchImpl:async()=>new Response('',{status:429})});assert.equal((await rate(request('projects'))).status,429);
  const b=bucket(),large=createCompanyCamHandler({env:{COMPANYCAM_API_KEY:'test'},fetchImpl:async url=>String(url).startsWith('https://app.companycam.com/')?response(photo):new Response('oversize',{headers:{'Content-Length':String(26*1024*1024)}})});assert.equal((await large(request('import',{locationId:'site',month:'2026-11',photoId:'10'}),b)).status,413);assert.equal(b.values.size,1);
 });
-test('CompanyCam endpoints retain team authentication and same-origin mutation checks',async()=>{
- let calls=0;const env={APP_PASSWORD:'synthetic-test-password-123',COMPANYCAM_API_KEY:'test'},h=createHandler({worker:{},storage:{},env,fetchImpl:async()=>{calls++;return response([]);}});assert.equal((await h(request('status'))).status,401);assert.equal(calls,0);const auth={Authorization:'Basic '+Buffer.from('team:'+env.APP_PASSWORD).toString('base64')};assert.equal((await h(new Request('https://app.test/api/companycam/status',{headers:auth}))).status,200);assert.equal(calls,1);assert.equal((await h(new Request('https://app.test/api/companycam/link',{method:'POST',headers:{...auth,Origin:'https://evil.test'},body:'{}'}))).status,403);assert.equal(calls,1);
+test('CompanyCam endpoints allow direct access and check the origin of changes',async()=>{
+ let calls=0;const h=createHandler({worker:{},storage:{},env:{COMPANYCAM_API_KEY:'test'},fetchImpl:async()=>{calls++;return response([]);}});
+ assert.equal((await h(request('status'))).status,200);assert.equal(calls,1);assert.equal((await h(new Request('https://app.test/api/companycam/link',{method:'POST',headers:{Origin:'https://evil.test'},body:'{}'}))).status,403);assert.equal(calls,1);
 });
 test('image normalization rejects invalid image content',async()=>{await assert.rejects(normalizePhoto(Buffer.from('not an image')));});
 

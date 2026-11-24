@@ -1,13 +1,6 @@
-import {createHash,timingSafeEqual} from 'node:crypto';
 import {BlobBucket} from './blob-bucket.js';
 import {createCompanyCamHandler} from './companycam.js';
 const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store'}});
-const equal=(a,b)=>timingSafeEqual(createHash('sha256').update(a).digest(),createHash('sha256').update(b).digest());
-export function authenticated(request,env){
- if(!env.APP_PASSWORD||env.APP_PASSWORD.length<16)return false;
- const header=request.headers.get('authorization')||'';if(!header.startsWith('Basic '))return false;
- try{const decoded=Buffer.from(header.slice(6),'base64').toString('utf8'),colon=decoded.indexOf(':');return colon>=0&&equal(decoded.slice(0,colon),env.APP_USERNAME||'team')&&equal(decoded.slice(colon+1),env.APP_PASSWORD);}catch{return false;}
-}
 export function routeRequest(request){
  const url=new URL(request.url);if(url.searchParams.has('__route')){const route=url.searchParams.get('__route');if(route.startsWith('/')||route.includes('\\'))throw Error('Invalid route');url.pathname='/'+route;url.searchParams.delete('__route');return new Request(url,request);}if(['/api/index','/api/index.js','/api','/api/'].includes(url.pathname)){url.pathname='/';return new Request(url,request);}return request;
 }
@@ -22,15 +15,13 @@ export function createHandler({worker,storage,handleUpload,env,fetchImpl,normali
    if(uploadBody?.type==='blob.upload-completed'){
     try{return json(await handleUpload({body:uploadBody,request,token:env.BLOB_READ_WRITE_TOKEN,onBeforeGenerateToken:async()=>{throw Error('Not authorized');},onUploadCompleted:async()=>{}}));}catch{return json({error:'Invalid upload callback.'},400);}
    }
-   if(!env.APP_PASSWORD||env.APP_PASSWORD.length<16)return new Response('Setup required: add APP_PASSWORD (at least 16 characters) in Vercel environment variables, then redeploy.',{status:503,headers:{'Cache-Control':'no-store'}});
-   if(!authenticated(request,env))return new Response('Sign in with the team username and password.',{status:401,headers:{'WWW-Authenticate':'Basic realm="Field Report Agent", charset="UTF-8"','Cache-Control':'no-store'}});
    if(request.method!=='GET'&&request.method!=='HEAD'&&request.headers.get('Origin')&&request.headers.get('Origin')!==url.origin)return json({error:'Cross-site request rejected.'},403);
    if(path.startsWith('/api/companycam/'))return companyCam(request,env.BLOB_READ_WRITE_TOKEN?new BlobBucket(storage,env.BLOB_READ_WRITE_TOKEN):null);
    if(path==='/api/uploads'){
     if(!uploadBody)return json({error:'Use POST to upload.'},405);
     if(!env.BLOB_READ_WRITE_TOKEN)return json({error:'Connect a private Vercel Blob store with BLOB_READ_WRITE_TOKEN, then redeploy.'},503);
     const response=await handleUpload({request,body:uploadBody,token:env.BLOB_READ_WRITE_TOKEN,onBeforeGenerateToken:async pathname=>{
-     if(!authenticated(request,env)||!/^incoming\/[a-f0-9-]+\.(docx|xlsx)$/i.test(pathname))throw Error('Invalid or unauthorized template upload.');
+     if(!/^incoming\/[a-f0-9-]+\.(docx|xlsx)$/i.test(pathname))throw Error('Invalid template upload path.');
      return {allowedContentTypes:['application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/zip','application/octet-stream'],maximumSizeInBytes:12*1024*1024,validUntil:Date.now()+10*60*1000,addRandomSuffix:false,allowOverwrite:false,ttlDays:1};
     },onUploadCompleted:async()=>{}});
     return json(response);

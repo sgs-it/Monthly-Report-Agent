@@ -9,9 +9,8 @@ This version runs the report backend in a Node.js Vercel Function and stores tem
 1. Upload the extracted source files to your GitHub repository. Keep package.json, vercel.json, api, server, src, worker, web, and scripts at the repository root.
 2. In Vercel, use Framework Other, Node.js 24.x, Build Command npm run build, Output Directory public, and Install Command npm ci.
 3. Connect a private Blob store with the read-write token option so BLOB_READ_WRITE_TOKEN is added to the project.
-4. Add APP_USERNAME (for example team) and APP_PASSWORD (your own password of at least 16 characters) to Vercel environment variables.
-5. Redeploy and sign in with those shared team credentials.
-6. Import your masters from Projects & templates > Import template folder.
+4. Deploy and open your production website address. Anyone with the address can use the workspace.
+5. Import your masters from Projects & templates > Import template folder.
 
 The existing private Sites app and its files are separate. This package does not migrate that R2 library or modify the existing hosted app. Customer templates, photos, reports, node_modules, Git history, and secrets are excluded from the ZIP.
 
@@ -29,6 +28,6 @@ The browser suggests approved captions using a locally running image model. Revi
 
 ## Development and checks
 
-Use Node.js 24. Copy .env.example to .env.local and configure a separate development private Blob store and team credentials. Run npm ci, npm run build, npm test, npm run validate, then npm run dev. The development entry point uses private Blob storage.
+Use Node.js 24. Copy .env.example to .env.local and configure a separate development private Blob store. Run npm ci, npm run build, npm test, npm run validate, then npm run dev. The development entry point uses private Blob storage.
 
-The build, authentication, storage adapter, staged uploads larger than 4.5 MB, report generation, streamed downloads, and CompanyCam connection/month/project/pagination/retry rules are tested locally. Tests use simulated external services and a real JPEG image processor. The private-master Excel test skips when the customer master folder is absent. Your actual CompanyCam key and live Vercel deployment have not been tested. Automatic visual Word rendering was unavailable during the earlier document checks.
+The build, direct access, storage adapter, staged uploads larger than 4.5 MB, report generation, streamed downloads, and CompanyCam connection/month/project/pagination/retry rules are tested locally. Tests use simulated external services and a real JPEG image processor. The private-master Excel test skips when the customer master folder is absent. Your actual CompanyCam key and live Vercel deployment have not been tested. Automatic visual Word rendering was unavailable during the earlier document checks.

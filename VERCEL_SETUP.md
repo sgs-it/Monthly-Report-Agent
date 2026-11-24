@@ -25,23 +25,13 @@ Extract the ZIP and upload the contents of its `field-report-agent` folder into 
 4. Connect it to this project and select the option to add a read-write token environment variable. Use the default prefix so its name is `BLOB_READ_WRITE_TOKEN`.
 5. Include the Production environment, plus Preview if you use preview deployments.
 
-Templates, normalized photos, JSON metadata, and generated reports are stored in this private Blob store. Browser template uploads go directly to Blob through authenticated, short-lived upload tokens; this allows your masters larger than 4.5 MB. Downloads are streamed through the authenticated backend.
+Templates, normalized photos, JSON metadata, and generated reports are stored in this private Blob store. Browser template uploads go directly to Blob through short-lived upload tokens; this allows your masters larger than 4.5 MB. Downloads are streamed through the report backend.
 
 Official guide: https://vercel.com/docs/vercel-blob/client-upload
 
-## Configure team sign-in
+## Open the workspace
 
-In Project Settings > Environment Variables, add:
-
-| Name | Value |
-| --- | --- |
-| `APP_USERNAME` | `team`, or your chosen shared username |
-| `APP_PASSWORD` | Your own password of at least 16 characters |
-| `BLOB_READ_WRITE_TOKEN` | The token created by the private Blob connection |
-
-Add them to the environments you deploy. Keep the actual values out of GitHub. `.env.example` contains only empty placeholders. The application returns a setup message until the password is configured; it does not expose the report library anonymously.
-
-Redeploy after saving the environment variables. When you open the site, enter your shared username and password in the browser's sign-in prompt. This version uses a shared team login; individual accounts and per-user roles are not included.
+Open the normal deployment URL. Anyone with access to this address can view, change, and download workspace data and import photos from the connected CompanyCam account.
 
 ## Import the masters
 
@@ -63,7 +53,7 @@ If the status says Not connected, use Check connection and follow the returned e
 
 ## Local development
 
-Install Node.js 24. Copy `.env.example` to `.env.local` and fill in the team login and a development private Blob token. Then run:
+Install Node.js 24. Copy `.env.example` to `.env.local` and fill in a development private Blob token. Then run:
 
 ```text
 npm ci
@@ -77,4 +67,4 @@ Open http://localhost:4173. This Vercel development entry point also uses the pr
 
 ## Verification
 
-The package is tested locally without `.openai/hosting.json`, including protected routing, staged large template uploads, private storage operations, report generation, and streamed Word downloads. Tests use simulated Blob storage. A real deployment and live Blob credentials have not been exercised in your Vercel account. The optional private-master Excel test skips when the master folder is absent.
+The package is tested locally without `.openai/hosting.json`, including direct routing, staged large template uploads, private storage operations, report generation, and streamed Word downloads. Tests use simulated Blob storage. A real deployment and live Blob credentials have not been exercised in your Vercel account. The optional private-master Excel test skips when the master folder is absent.
